@@ -1,0 +1,28 @@
+name: Deploy AWS Lambda
+
+on:
+  push:
+    branches:
+      - main
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    permissions:
+      id-token: write # Required for OIDC
+      contents: read # Required to check out the repo
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: arn:aws:iam::844905860028:role/GitHubActionsLambdaDeploy
+          aws-region: us-east-1
+
+      - name: Deploy Lambda Function
+        uses: aws-actions/aws-lambda-deploy@v1
+        with:
+          function-name: rollcall-lambda
+          code-artifacts-dir: ./
