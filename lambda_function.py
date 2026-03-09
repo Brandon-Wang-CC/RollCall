@@ -259,7 +259,7 @@ def lambda_handler(event, context):
         body = json.loads(record["body"])
 
         bucket = body.get("bucket")
-        file_key = body.get("file")
+        file_key = body.get("object_key")
 
         if not bucket and not file_key:
             logger.error("Missing bucket and file name")
