@@ -93,7 +93,28 @@ def validate_row(row: dict) -> list:
 def transform_row(row: dict) -> dict:
     if 'StartDate' in row and row['StartDate']:
         row['StartDate'] = row['StartDate']
-    return row
+    blank_val = "BLANK"
+    newRow = {}
+
+    newRow["Department"] = row.get("Dept", blank_val)
+    newRow["WorkerType"] = row.get("Worker Type", blank_val)
+    newRow["JobCode"] = row.get("JobCode", blank_val)
+    newRow["JobProfile"] = row.get("Job Profile", blank_val)
+    newRow["CostCenter"] = row.get("Cost Center ID", blank_val)
+    newRow["GradeLevel"] = row.get("GradeLevel", blank_val)
+    newRow["Management"] = row.get("Management", blank_val)
+    newRow["ManagerName"] = row.get("ManagerName", blank_val)
+    newRow["MD1"] = row.get("MD1", blank_val)
+    newRow["MD2"] = row.get("MD2", blank_val)
+    newRow["Status"] = row.get("Status", blank_val)
+    newRow["ReqNumber"] = row.get("ReqNumber", blank_val)
+    newRow["HireName"] = row.get("Employee Name", blank_val)
+    newRow["StartDate"] = row.get("StartDate", blank_val)
+    newRow["State"] = row.get("State", blank_val)
+    newRow["PrimaryLocation"] = row.get("Work Location", blank_val)
+    newRow["AdditionalLocations"] = row.get("AdditionalLocations", blank_val)
+    newRow["Comment"] = row.get("Comment", blank_val)
+    return newRow
 
 # =========================
 # S3
@@ -238,10 +259,16 @@ def lambda_handler(event, context):
         body = json.loads(record["body"])
 
         bucket = body.get("bucket")
-        file_key = body.get("file")
+        file_key = body.get("object_key")
 
-        if not bucket or not file_key:
-            logger.error("Missing bucket or file name")
+        if not bucket and not file_key:
+            logger.error("Missing bucket and file name")
+            continue
+        if not bucket:
+            logger.error("Missing bucket")
+            continue
+        if not file_key:
+            logger.error("Missing file name")
             continue
 
         try:
