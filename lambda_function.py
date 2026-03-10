@@ -1,5 +1,7 @@
 import json
 import logging
+import random
+
 import boto3
 import csv
 import io
@@ -107,7 +109,7 @@ def transform_row(row: dict) -> dict:
     newRow["MD1"] = row.get("MD1", blank_val)
     newRow["MD2"] = row.get("MD2", blank_val)
     newRow["Status"] = row.get("Status", blank_val)
-    newRow["ReqNumber"] = row.get("ReqNumber", blank_val)
+    newRow["ReqNumber"] = row.get("ReqNumber", random.randint(0,9999999))
     newRow["HireName"] = row.get("Employee Name", blank_val)
     newRow["StartDate"] = row.get("StartDate", blank_val)
     newRow["State"] = row.get("State", blank_val)
