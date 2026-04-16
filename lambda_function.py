@@ -237,7 +237,6 @@ def contractor_filled(rows: dict) -> dict:
     #State Check
     #Contractor Req Status Check
     #Potential Name Check?
-
     # Status Check
     date_for_contractor = get_three_days_pre_monday()
     req_number_current = newRow.get("ReqNumber", "")
