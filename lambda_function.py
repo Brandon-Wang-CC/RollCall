@@ -7,6 +7,7 @@ import csv
 import io
 import pymysql
 import botocore.exceptions
+from datetime import datetime, timedelta
 
 # =========================
 # Logging
@@ -19,6 +20,7 @@ logger.setLevel(logging.INFO)
 # =========================
 s3 = boto3.client("s3")
 secrets_client = boto3.client("secretsmanager")
+
 
 # =========================
 # Secrets Manager
@@ -89,6 +91,21 @@ def validate_row(row: dict) -> list:
     errors = []
     return errors
 
+def get_three_days_pre_monday() -> datetime:
+    """
+    Calculate the date that is 3 days before the last Monday. For Contractor Filled logic.
+    
+    Example: If today is Thursday Apr 18, 2026:
+    - Last Monday was Apr 13
+    - 3 days before Monday = Friday Apr 10
+    """
+    today = datetime.now()
+    # Calculate days since last Monday (0=Monday, 6=Sunday)
+    days_since_monday = (today.weekday() - 0) % 7
+    last_monday = today - timedelta(days=days_since_monday)
+    three_days_pre_monday = last_monday - timedelta(days=3)
+    return three_days_pre_monday
+
 # =========================
 # Transformation
 # =========================
@@ -131,6 +148,123 @@ def download_csv(bucket: str, key: str) -> str:
 def parse_csv(content: str) -> list:
     reader = csv.DictReader(io.StringIO(content))
     return list(reader)
+
+# =========================
+# DeptsSheet Turned into a Dictionary
+# =========================
+departments_lookup = {
+    "1083": "Admin",
+    "1734": "Admin",
+    "1011": "CSOC",
+    "890": "Europe",
+    "826": "GES",
+    "827": "GES",
+    "1018": "GES",
+    "1068": "GES",
+    "1075": "GES",
+    "1076": "GES",
+    "1081": "GES",
+    "1096": "GES",
+    "981": "GS&F",
+    "1176": "GS&F",
+    "1484": "GS&F",
+    "437": "IAM",
+    "460": "IAM",
+    "1575": "IAM",
+    "1576": "IAM",
+    "1577": "IAM",
+    "1578": "IAM",
+    "1579": "IAM",
+    "2431": "IAM",
+    "1293": "Infosys",
+    "1483": "Infosys",
+    "1706": "Infosys",
+    "973": "Infosys",
+    "1077": "SAEP",
+    "1078": "SAEP",
+    "1079": "SAEP",
+    "1080": "SAEP",
+    "1117": "SAEP",
+    "1084": "VIA",
+    "0808": "* NOT ES&F *",
+    "808": "* NOT ES&F *"
+}
+
+# =========================
+# Contractor Filled Logic
+# =========================
+def contractor_filled(rows: dict) -> dict:
+    newRow = {}   
+    # Department Check
+    if rows.get("CostCenter") is not None:
+        if departments_lookup.get(rows.get("CostCenter")) == "Infosys":  #Test Case: What if cost center is a random number that isnt in the table?
+            print("Still working")
+        else:
+            newRow["Department"] = departments_lookup.get(rows.get("CostCenter"))
+    else:
+        newRow["Department"] = ""
+        
+    #Worker Type Check
+    if rows.get("WorkerType", "") != "":  #Test Case: What if this is something random that isn't blank or contractor?
+        newRow["WorkerType"] = "Contractor"
+    else:
+        newRow["WorkerType"] = ""
+
+    #Job Profile Check
+    #Cost Center Check
+    #Grade Level Check
+    if rows.get("GradeLevel", "") != "":  #Test Case: What if this is something random that isn't blank?
+        newRow["GradeLevel"] = "00"
+    else:
+        newRow["GradeLevel"] = ""
+
+    #Management Check
+    if rows.get("Management", "") != "":  #Test Case: What if this is something random that isn't blank or Non-Management?
+        newRow["Management"] = "Non-Management"
+    else:
+        newRow["Management"] = ""
+    #Manager Name Check
+    #MD1 Check
+    if rows.get("MD1", "") != "":  #Test Case: What if this is something random that isn't blank or Manish Nagar (019067)?
+        newRow["MD1"] = "Manish Nagar (019067)"
+    else:
+        newRow["MD1"] = ""
+    #MD2 Check
+    #Req Number Check
+    #FTE Check Pending
+    #Hire Name Check
+    #Start Date Check
+    #State Check
+    #Contractor Req Status Check
+    #Potential Name Check?
+
+    # Status Check
+    date_for_contractor = get_three_days_pre_monday()
+    req_number_current = newRow.get("ReqNumber", "")
+    start_date = rows.get("StartDate", "")
+    
+    if not req_number_current:
+        newRow["Status"] = ""
+        return newRow
+    
+    dept = rows.get("Department")
+
+    # ISERROR(VLOOKUP()) Look up current ReqNumber in ESF file and grab the department value and see if its valid
+    if dept is None: #If there is an error with department value
+        if start_date < date_for_contractor:
+            newRow["Status"] = "Validate if started"
+        else:
+            newRow["Status"] = "NEW"
+    else:
+        if rows.get("CostCenter", "") == "":
+            newRow["Status"] = "Newly Filled"
+        else:
+            newRow["Status"] = "Filled"
+
+    return newRow
+
+
+
 
 # =========================
 # Database
@@ -285,7 +419,7 @@ def lambda_handler(event, context):
 
                 if errors:
                     invalid_rows.append({"row": row, "errors": errors})
-                else:
+                else:  # Apply contractor filled logic and transform
                     transformed = transform_row(row)
                     valid_rows.append(transformed)
 
