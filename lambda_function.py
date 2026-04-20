@@ -7,6 +7,8 @@ import csv
 import io
 import pymysql
 import botocore.exceptions
+import pandas as pd
+import numpy as np
 from datetime import datetime, timedelta
 
 # =========================
@@ -152,6 +154,8 @@ def parse_csv(content: str) -> list:
 # =========================
 # DeptsSheet Turned into a Dictionary
 # =========================
+
+#Edit this if any of these change
 departments_lookup = {
     "1083": "Admin",
     "1734": "Admin",
@@ -190,15 +194,31 @@ departments_lookup = {
     "808": "* NOT ES&F *"
 }
 
+#Edit this if any of these change
+md2_lookup = { 
+    "CSOC": "Grant Page (041775)",
+    "IAM": "Srinath Chigullapalli (022053)",
+    "GS&F": "Vanessa Richards (184977)",
+    "GES": "Guy Delp (188729)",
+    "SAEP": "Monnappa Kokkengada (018831)",
+    "Europe": "Josh Sowers (175014)",
+    "VIA": "John Mabbott (064823)",
+    "Admin": "Guy Delp (188729)"
+}
+
 # =========================
 # Contractor Filled Logic
 # =========================
-def contractor_filled(rows: dict) -> dict:
+# main_df is contractor filled
+# contractor_closed_df is contractor closed
+#
+#
+def contractor_filled(rows: dict, contractor_closed_data) -> dict:
     newRow = {}   
-    # Department Check
+    # Department Check WIP
     if rows.get("CostCenter") is not None:
         if departments_lookup.get(rows.get("CostCenter")) == "Infosys":  #Test Case: What if cost center is a random number that isnt in the table?
-            print("Still working")
+            print("Still working waiting for charlie")
         else:
             newRow["Department"] = departments_lookup.get(rows.get("CostCenter"))
     else:
@@ -230,14 +250,23 @@ def contractor_filled(rows: dict) -> dict:
     else:
         newRow["MD1"] = ""
     #MD2 Check
+    if rows.get("Status") != "":
+        #Do If IsError here
+        if rows.get("Department") is not None:
+            newRow["MD2"] = md2_lookup.get(rows.get("Department"))
+        else:
+            # VLOOKUP('Contractor Filled'!M5,ContractorClosed!C:G,5,0),
+            # Need a way to reference the Contractor Closed sheet here, then look up the req #, and display the cost center
+            reqNumberToGet = contractor_closed_data.get("ReqNumber")
+            
+
+    else:
+        newRow["MD2"] = ""
     #Req Number Check
-    #FTE Check Pending
     #Hire Name Check
     #Start Date Check
     #State Check
-    #Contractor Req Status Check
-    #Potential Name Check?
-    # Status Check
+    #Status Check
     date_for_contractor = get_three_days_pre_monday()
     req_number_current = newRow.get("ReqNumber", "")
     start_date = rows.get("StartDate", "")
