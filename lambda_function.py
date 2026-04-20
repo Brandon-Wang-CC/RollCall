@@ -151,49 +151,6 @@ def parse_csv(content: str) -> list:
     reader = csv.DictReader(io.StringIO(content))
     return list(reader)
 
-# =========================
-# DeptsSheet Turned into a Dictionary
-# =========================
-
-#Edit this if any of these change
-departments_lookup = {
-    "1083": "Admin",
-    "1734": "Admin",
-    "1011": "CSOC",
-    "890": "Europe",
-    "826": "GES",
-    "827": "GES",
-    "1018": "GES",
-    "1068": "GES",
-    "1075": "GES",
-    "1076": "GES",
-    "1081": "GES",
-    "1096": "GES",
-    "981": "GS&F",
-    "1176": "GS&F",
-    "1484": "GS&F",
-    "437": "IAM",
-    "460": "IAM",
-    "1575": "IAM",
-    "1576": "IAM",
-    "1577": "IAM",
-    "1578": "IAM",
-    "1579": "IAM",
-    "2431": "IAM",
-    "1293": "Infosys",
-    "1483": "Infosys",
-    "1706": "Infosys",
-    "973": "Infosys",
-    "1077": "SAEP",
-    "1078": "SAEP",
-    "1079": "SAEP",
-    "1080": "SAEP",
-    "1117": "SAEP",
-    "1084": "VIA",
-    "0808": "* NOT ES&F *",
-    "808": "* NOT ES&F *"
-}
-
 #Edit this if any of these change
 md2_lookup = { 
     "CSOC": "Grant Page (041775)",
@@ -209,10 +166,7 @@ md2_lookup = {
 # =========================
 # Contractor Filled Logic
 # =========================
-# main_df is contractor filled
-# contractor_closed_df is contractor closed
-#
-#
+
 def contractor_filled(rows: dict, contractor_closed_data) -> dict:
     newRow = {}   
     # Department Check WIP
