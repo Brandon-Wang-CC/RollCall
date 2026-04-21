@@ -245,83 +245,57 @@ def build_contractor_unfilled(filtered, ref):
 
 def build_contractor_filled(filtered, ref):
     # returns a DataFrame
-    df = filtered["contractor_closed"].copy()
+    cc = filtered["contractor_closed"].copy()
+    esf_all = ref["esf_all"].copy()
+    df = pd.DataFrame(columns=['Status', 'Department', 'WorkerType', 'JobProfile', 'CostCenter', 'GradeLevel', 'Management', 'ManagerName', 'MD1', 'MD2', 'ReqNumber', 'HireName', 'StartDate', 'State'])
 
-    df = df.rename(columns={
-        "Req #": "ReqNumber",
-        "Cost Center": "CostCenter",
-        "Manager Name": "ManagerName",
-        "Job Profile": "JobProfile",
-        "Start Date": "StartDate",
-        "Req Status": "ReqStatus"
-    })
+    # ~Department Check
+    cc_df = ref["cc_id"]
+    try:
+        df["Department"] = pd.merge(df, cc_df, left_on="CostCenter", right_on='cc_id', how="inner")
+    except pd.errors.MergeError:
+        df["Department"] = df["Department"].fillna("")
 
-    #Department Check
-    cc_df = ref["cc_id"].rename(columns={
-        "cc_id": "CostCenter",
-        "subdepartment": "Department"
-    })
-    df = df.merge(cc_df, on="CostCenter", how="left")
-    df["Department"] = df["Department"].fillna("")
+    # ~Infosys override
+    infosys_check = df["Department"] == "Infosys"
 
-    # Infosys override
-    infosys_mask = df["Department"] == "Infosys"
+    if infosys_check:
+        #Need assistance
+        pass
 
-    if infosys_mask:
-        esf_all = ref["esf_all"]
+    # ~Req Number Check
 
+    # ~Cost Center Check
 
+    # ~Manager Name Check
 
-    # Worker Type Check
-    df["WorkerType"] = np.where(df["CostCenter"].notna(), "Contractor", "")  # Test Case: What if this is something random that isn't blank or contractor?
+    # ~Job Profile Check
 
-    # Job Profile Check
-    # Cost Center Check
-    # Grade Level Check
+    # ~MD2 Check
+
+    # ~Hire Name Check
+    # ~Start Date Check
+    # ~State Check
+
+    # ~Grade Level Check
     df["GradeLevel"] = np.where(df["ReqNumber"].notna(), "00", "")
 
-    # Management Check
+    # ~Management Check
     df["Management"] = np.where(df["ReqNumber"].notna(), "Non-Management", "")
-    # Manager Name Check
-    # MD1 Check
+    # ~MD1 Check
     df["Management"] = np.where(df["ReqNumber"].notna(), "Manish Nagar (019067)", "")
+    # ~Worker Type Check
+    df["WorkerType"] = np.where(df["CostCenter"].notna(), "Contractor", "")  # Test Case: What if this is something random that isn't blank or contractor?
 
-    # MD2 Check
-    depts_df = ref["depts"]
-    df = df.merge(
-        depts_df[["Department", "MD2"]],
-        on="Department",
-        how="left"
-    )
-
-
-
-    # Req Number Check
-    # Hire Name Check
-    # Start Date Check
-    # State Check
-    # Status Check
+    # ~Status Check
     date_for_contractor = get_three_days_pre_monday()
-    req_number_current = newRow.get("ReqNumber", "")
-    start_date = rows.get("StartDate", "")
 
-    if not req_number_current:
-        newRow["Status"] = ""
-        return newRow
-
-    dept = rows.get("Department")
+    #If ReqNumber is empty. Then set it to be empy.
+    # df["Status"] = np.where(df["ReqNumber"] == "", "", np.where(df.merge(esf_all[])))
 
     # ISERROR(VLOOKUP()) Look up current ReqNumber in ESF file and grab the department value and see if its valid
-    if dept is None:  # If there is an error with department value
-        if start_date < date_for_contractor:
-            newRow["Status"] = "Validate if started"
-        else:
-            newRow["Status"] = "NEW"
-    else:
-        if rows.get("CostCenter", "") == "":
-            newRow["Status"] = "Newly Filled"
-        else:
-            newRow["Status"] = "Filled"
+
+
 
     return df
 
