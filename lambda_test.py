@@ -214,12 +214,9 @@ def load_reference_data(bucket_name):
     }
 
 # =========================
-# Three days pre monday
+# Three days pre monday for Status
 # =========================
 def get_three_days_pre_monday():
-    """
-    Calculate the date that is 3 days before the last Monday. For Contractor Filled logic.
-    """
     today = datetime.now()
     # Calculate days since last Monday (0=Monday, 6=Sunday)
     days_since_monday = (today.weekday() - 0) % 7
@@ -245,60 +242,182 @@ def build_contractor_unfilled(filtered, ref):
 
 def build_contractor_filled(filtered, ref):
     # returns a DataFrame
+    """
+       Converts the Excel "Contractor Filled" tab formulas into pandas logic.
+
+       All column-letter references below map to the Excel formula spec:
+         Col A = Status,  Col B = Department,  Col C = Worker Type,
+         Col E = Job Profile,  Col F = Cost Center,  Col G = Grade Level,
+         Col H = Management,  Col I = Manager Name,  Col J = MD-1,
+         Col K = MD-2,  Col L = Status (Short),  Col M = Req #,
+         Col N = FTE,  Col Q = Hire Name,  Col R = Start Date,
+         Col S = State,  Col W = Contractor Req Status
+       """
+    #Clones of the dataframes
     cc = filtered["contractor_closed"].copy()
-    esf_all = ref["esf_all"].copy()
-    df = pd.DataFrame(columns=['Status', 'Department', 'WorkerType', 'JobProfile', 'CostCenter', 'GradeLevel', 'Management', 'ManagerName', 'MD1', 'MD2', 'ReqNumber', 'HireName', 'StartDate', 'State'])
+    esf_reqs = ref["esf_reqs"].copy()
+    df = pd.DataFrame(columns=['Status', 'Department', 'WorkerType', 'JobProfile', 'CostCenter', 'GradeLevel', 'Management', 'ManagerName', 'MD1', 'MD2', 'ReqNumber', 'HireName', 'StartDate', 'State', 'ContractorReqStatus', 'SecondStatus'])
 
-    # ~Department Check
-    cc_df = ref["cc_id"]
-    try:
-        df["Department"] = pd.merge(df, cc_df, left_on="CostCenter", right_on='cc_id', how="inner")
-    except pd.errors.MergeError:
-        df["Department"] = df["Department"].fillna("")
+    # ------------------------------------------------------------------
+    # REQ NUMBER
+    # ------------------------------------------------------------------
+    df["ReqNumber"] = pd.to_numeric(cc["Req #"], errors="coerce")
+    # ------------------------------------------------------------------
+    # COST CENTER
+    # ------------------------------------------------------------------
+    df["CostCenter"] = cc["Cost Center"].values
+    # ------------------------------------------------------------------
+    # Manager Name
+    # ------------------------------------------------------------------
+    df["ManagerName"] = cc["Hiring Manager"].values
+    # ------------------------------------------------------------------
+    # Job Profile
+    # ------------------------------------------------------------------
+    df["JobProfile"] = cc["Job Tile (Standardized)"].values
+    # ------------------------------------------------------------------
+    # Start Date
+    # ------------------------------------------------------------------
+    df["StartDate"] = cc["Start Date"].values
+    # ------------------------------------------------------------------
+    # State Check
+    # ------------------------------------------------------------------
+    df["State"] = cc["LOC"].values
+    # ------------------------------------------------------------------
+    # Contractor REQ Status Check?
+    # ------------------------------------------------------------------
+    df["ContractorReqStatus"] = cc['Status\n(Please Make a Selection from List)'].values
 
-    # ~Infosys override
-    infosys_check = df["Department"] == "Infosys"
+    # ------------------------------------------------------------------
+    # Department
+    # ------------------------------------------------------------------
+    cc_id_df = ref["cc_id"].copy()
+    cc_id_df["cc_id"] = pd.to_numeric(cc_id_df["cc_id"], errors="coerce")
+    cc_to_subdept = cc_id_df.dropna(subset=["cc_id"]).set_index("cc_id")["subdepartment"].to_dict()
 
-    if infosys_check:
-        #Need assistance
-        pass
+        # --- ESF ALL: for Infosys override ---
+        # Formula: INDEX(ALL!$A:$R, MATCH(ManagerName, ALL!$R:$R, 0), 1)
+        # Col R in ALL (0-indexed col 17) = "Cost Center ##" in sample file.
+        # Matches Manager Name against that column and returns col A (Department).
+    esf_all = ref["esf_all"]
+    all_col_r_name = esf_all.columns[17]
+    infosys_lookup = (
+        esf_all.dropna(subset=[all_col_r_name])
+        .set_index(all_col_r_name)["Department"]
+        .to_dict()
+    )
+    def lookup_department(cost_center, manager_name) -> str:
+        try:
+            cc_key = int(str(cost_center).strip()[:4])
+            subdept = cc_to_subdept.get(cc_key)
+            if subdept is None:
+                return ""
+            if subdept == "Infosys":
+                return infosys_lookup.get(manager_name, "")
+            return subdept
+        except (ValueError, TypeError):
+            return ""
 
-    # ~Req Number Check
+    df["Department"] = [
+        lookup_department(cc, mgr)
+        for cc, mgr in zip(df["Cost Center ID"], df["Manager Name"])
+    ]
 
-    # ~Cost Center Check
-
-    # ~Manager Name Check
-
-    # ~Job Profile Check
-
-    # ~MD2 Check
-
-    # ~Hire Name Check
-    # ~Start Date Check
-    # ~State Check
-
-    # ~Grade Level Check
+    # ------------------------------------------------------------------
+    # Grade Level
+    # ------------------------------------------------------------------
     df["GradeLevel"] = np.where(df["ReqNumber"].notna(), "00", "")
-
-    # ~Management Check
+    # ------------------------------------------------------------------
+    # Management
+    # ------------------------------------------------------------------
     df["Management"] = np.where(df["ReqNumber"].notna(), "Non-Management", "")
-    # ~MD1 Check
-    df["Management"] = np.where(df["ReqNumber"].notna(), "Manish Nagar (019067)", "")
-    # ~Worker Type Check
+    # ------------------------------------------------------------------
+    # MD1
+    # ------------------------------------------------------------------
+    df["MD1"] = np.where(df["ReqNumber"].notna(), "Manish Nagar (019067)", "")
+    # ------------------------------------------------------------------
+    # Worker Type
+    # ------------------------------------------------------------------
     df["WorkerType"] = np.where(df["CostCenter"].notna(), "Contractor", "")  # Test Case: What if this is something random that isn't blank or contractor?
-
-    # ~Status Check
+    # ------------------------------------------------------------------
+    # Hire Name
+    # ------------------------------------------------------------------
+    esf_reqs["Req #"] = pd.to_numeric(esf_reqs["Req #"], errors="coerce") #Convert the strings to numbers
+    req_to_hire_name = (
+        esf_reqs.dropna(subset=["Req #"])
+                .set_index("Req #")["Hire Name"]
+                .to_dict()
+        if "Hire Name" in esf_reqs.columns else {}
+    )
+    df["HireName"] = [
+        "" if pd.isna(req) else req_to_hire_name.get(req, "")
+        for req in df["ReqNumber"]
+    ]
+    # ------------------------------------------------------------------
+    # Status Check
+    # ------------------------------------------------------------------
+    req_exists_set = set(esf_reqs["Req #"].dropna())
     date_for_contractor = get_three_days_pre_monday()
 
-    #If ReqNumber is empty. Then set it to be empy.
-    # df["Status"] = np.where(df["ReqNumber"] == "", "", np.where(df.merge(esf_all[])))
+    def compute_status(req_num, start_date, hire_name: str) -> str:
+        if pd.isna(req_num):
+            return ""
+        in_reqs = req_num in req_exists_set  # ISERROR -> not in set
+        if not in_reqs:
+            start = pd.to_datetime(start_date, errors="coerce")
+            if pd.notna(start) and start < date_for_contractor:
+                return "Validate if started"
+            return "NEW"
+        # Req exists: check Hire Name (col P / 5th from L)
+        return "Newly Filled" if not hire_name else "Filled"
 
-    # ISERROR(VLOOKUP()) Look up current ReqNumber in ESF file and grab the department value and see if its valid
+    df["Status"] = [
+        compute_status(req, sd, hn)
+        for req, sd, hn in zip(df["ReqNumber"], df["StartDate"], df["HireName"])
+    ]
+    # ------------------------------------------------------------------
+    # Second Status?
+    # ------------------------------------------------------------------
+    depts_df = ref["depts"]
 
+    # Status short (Col L): IFERROR(VLOOKUP(W5, Depts!K:L, 2, 0), "")
+    # Depts col K = "Status" (full text), col L = "Unnamed: 11" (short label)
+    status_map = (
+        depts_df.dropna(subset=["Status"])
+        .set_index("Status")["Unnamed: 11"]
+        .to_dict()
+    )
+    df["SecondStatus"] = [status_map.get(str(s), "") for s in df["ContractorReqStatus"]]
 
+    # ------------------------------------------------------------------
+    # MD2
+    # ------------------------------------------------------------------
+    dept_to_md2 = (
+        depts_df.dropna(subset=["Department"])
+        .set_index("Department")["Unnamed: 7"]  # 4th col of E:J range
+        .to_dict()
+    )
+    req_to_dept_head = (
+        df.dropna(subset=["Req #"])
+        .set_index("Req #")["Dept Head"]
+        .to_dict()
+        if "Dept Head" in df.columns else {}
+    )
 
+    def compute_md2(status_a: str, dept: str, req_num) -> str:
+        if not status_a:
+            return ""
+        md2 = dept_to_md2.get(dept)
+        if md2 is None:  # ISERROR -> fallback to Dept Head from ContractorClosed
+            return str(req_to_dept_head.get(req_num, ""))
+        return str(md2)
+
+    df["MD2"] = [
+        compute_md2(st, dept, req)
+        for st, dept, req in zip(df["Status"], df["Department"], df["ReqNumber"])
+    ]
+
+    #Final Return
     return df
-
 
 
 
