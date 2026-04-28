@@ -256,6 +256,7 @@ def build_contractor_filled(filtered, ref):
     #Clones of the dataframes
     cc = filtered["contractor_closed"].copy()
     esf_reqs = ref["esf_reqs"].copy()
+    stats = ref["status"].copy()
     df = pd.DataFrame(columns=['Status', 'Department', 'WorkerType', 'JobProfile', 'CostCenter', 'GradeLevel', 'Management', 'ManagerName', 'MD1', 'MD2', 'ReqNumber', 'HireName', 'StartDate', 'State', 'ContractorReqStatus', 'SecondStatus'])
 
     # ------------------------------------------------------------------
@@ -382,8 +383,8 @@ def build_contractor_filled(filtered, ref):
     # Status short (Col L): IFERROR(VLOOKUP(W5, Depts!K:L, 2, 0), "")
     # Depts col K = "Status" (full text), col L = "Unnamed: 11" (short label)
     status_map = (
-        depts_df.dropna(subset=["Status"])
-        .set_index("Status")["Unnamed: 11"]
+        stats.dropna(subset=["status"])
+        .set_index("status")["short status"]
         .to_dict()
     )
     df["SecondStatus"] = [status_map.get(str(s), "") for s in df["ContractorReqStatus"]]
@@ -392,8 +393,8 @@ def build_contractor_filled(filtered, ref):
     # MD2
     # ------------------------------------------------------------------
     dept_to_md2 = (
-        depts_df.dropna(subset=["Department"])
-        .set_index("Department")["Unnamed: 7"]  # 4th col of E:J range
+        depts_df.dropna(subset=["department"])
+        .set_index("department")["MD-2"]
         .to_dict()
     )
     req_to_dept_head = (
@@ -429,19 +430,6 @@ def write_output_workbook(crew_unfilled, crew_filled, contractor_unfilled, contr
 # Main / Test
 # =========================
 if __name__ == "__main__":
-    # discovered = discover_files(BUCKET_NAME)
-    # local_files = download_all_files(BUCKET_NAME, discovered)
-    # filtered = filter_all_files(local_files)
-
-    # dept_codes = load_dept_codes(DEPTS_BUCKET, CC_ID_FILE)
-    # filtered["candidates"] = filter_candidates(local_files["candidates"], dept_codes)
-
-    # for name, df in filtered.items():
-    #     print(f"{name}: {len(df)} rows")
-
-    # ref = load_reference_data(DEPTS_BUCKET)
-    # for name, df in ref.items():
-    #     print(f"{name}: {len(df)} rows, columns: {list(df.columns)}")
     discovered = discover_files(BUCKET_NAME)
     local_files = download_all_files(BUCKET_NAME, discovered)
     filtered = filter_all_files(local_files)
@@ -449,14 +437,9 @@ if __name__ == "__main__":
     dept_codes = load_dept_codes(DEPTS_BUCKET, CC_ID_FILE)
     filtered["candidates"] = filter_candidates(local_files["candidates"], dept_codes)
 
+    for name, df in filtered.items():
+        print(f"{name}: {len(df)} rows")
+
     ref = load_reference_data(DEPTS_BUCKET)
-
-    # --- Inspect reference column names before running build ---
-    print("depts columns:", list(ref["depts"].columns))
-    print("esf_all columns:", list(ref["esf_all"].columns))
-    print("esf_reqs columns:", list(ref["esf_reqs"].columns))
-    print("contractor_closed columns:", list(filtered["contractor_closed"].columns))
-
-    result = build_contractor_filled(filtered, ref)
-    print(result.head())
-    print(result.dtypes)
+    for name, df in ref.items():
+        print(f"{name}: {len(df)} rows, columns: {list(df.columns)}")
