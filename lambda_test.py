@@ -7,6 +7,7 @@ import io
 import botocore.exceptions
 import os
 import pandas as pd
+import sys
 
 # =========================
 # Logging
@@ -443,3 +444,21 @@ if __name__ == "__main__":
     ref = load_reference_data(DEPTS_BUCKET)
     for name, df in ref.items():
         print(f"{name}: {len(df)} rows, columns: {list(df.columns)}")
+        # discovered = discover_files(BUCKET_NAME)
+    # local_files = download_all_files(BUCKET_NAME, discovered)
+    # filtered = filter_all_files(local_files)
+
+    # dept_codes = load_dept_codes(DEPTS_BUCKET, CC_ID_FILE)
+    # filtered["candidates"] = filter_candidates(local_files["candidates"], dept_codes)
+
+    # ref = load_reference_data(DEPTS_BUCKET)
+
+    # # --- Inspect reference column names before running build ---
+    # print("depts columns:", list(ref["depts"].columns))
+    # print("esf_all columns:", list(ref["esf_all"].columns))
+    # print("esf_reqs columns:", list(ref["esf_reqs"].columns))
+    # print("contractor_closed columns:", list(filtered["contractor_closed"].columns))
+
+    result = build_contractor_filled(filtered, ref)
+    with open('contractorfilledresult.csv', 'w') as f:
+        f.write(result.to_csv(index=False))
