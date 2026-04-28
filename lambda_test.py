@@ -198,7 +198,10 @@ def load_reference_data(bucket_name):
 
     esf_reqs_df = pd.read_excel(esf_bytes, sheet_name="Reqs")
     esf_reqs_df = esf_reqs_df.loc[:, ~esf_reqs_df.columns.str.startswith("Unnamed")]
-    esf_reqs_df["Req #"] = pd.to_numeric(esf_reqs_df["Req #"], errors="coerce")
+    esf_reqs_df["Req #"] = esf_reqs_df["Req #"].astype(str).str.strip()
+    # esf_reqs_df = pd.read_excel(esf_bytes, sheet_name="Reqs")
+    # esf_reqs_df = esf_reqs_df.loc[:, ~esf_reqs_df.columns.str.startswith("Unnamed")]
+    # esf_reqs_df["Req #"] = pd.to_numeric(esf_reqs_df["Req #"], errors="coerce")
     logger.info(f"Loaded ESF WF Reqs: {len(esf_reqs_df)} rows")
 
     esf_bytes.seek(0)  # Reset the byte stream before reading again
@@ -263,7 +266,7 @@ def build_contractor_filled(filtered, ref):
     # ------------------------------------------------------------------
     # REQ NUMBER
     # ------------------------------------------------------------------
-    df["ReqNumber"] = pd.to_numeric(cc["Req #"], errors="coerce")
+    df["ReqNumber"] = cc["Req #"].values
     # ------------------------------------------------------------------
     # COST CENTER
     # ------------------------------------------------------------------
@@ -324,26 +327,35 @@ def build_contractor_filled(filtered, ref):
         for cc, mgr in zip(df["CostCenter"], df["ManagerName"])
     ]
 
+    _req_str = df["ReqNumber"].astype(str).str.strip()
+    req_not_blank = df["ReqNumber"].notna() & (_req_str != "") & (_req_str.str.lower() != "nan")
+    cc_not_blank  = df["CostCenter"].notna() & (df["CostCenter"].astype(str).str.strip() != "")
     # ------------------------------------------------------------------
     # Grade Level
     # ------------------------------------------------------------------
-    df["GradeLevel"] = np.where(df["ReqNumber"].notna(), "00", "")
+    df["GradeLevel"] = np.where(req_not_blank, "00", "")
     # ------------------------------------------------------------------
     # Management
     # ------------------------------------------------------------------
-    df["Management"] = np.where(df["ReqNumber"].notna(), "Non-Management", "")
+    df["Management"] = np.where(req_not_blank, "Non-Management", "")
     # ------------------------------------------------------------------
     # MD1
     # ------------------------------------------------------------------
-    df["MD1"] = np.where(df["ReqNumber"].notna(), "Manish Nagar (019067)", "")
+    df["MD1"] = np.where(req_not_blank, "Manish Nagar (019067)", "")
     # ------------------------------------------------------------------
     # Worker Type
     # ------------------------------------------------------------------
-    df["WorkerType"] = np.where(df["CostCenter"].notna(), "Contractor", "")  # Test Case: What if this is something random that isn't blank or contractor?
-    # ------------------------------------------------------------------
+    df["WorkerType"] = np.where(cc_not_blank, "Contractor", "")  # Test Case: What if this is something random that isn't blank or contractor?
+ # ------------------------------------------------------------------
     # Hire Name
     # ------------------------------------------------------------------
-    esf_reqs["Req #"] = pd.to_numeric(esf_reqs["Req #"], errors="coerce") #Convert the strings to numbers
+    def _normalize_req(val) -> str:
+        s = str(val).strip()
+        return "" if (not s or s.lower() == "nan") else s
+
+    esf_reqs["Req #"] = esf_reqs["Req #"].apply(_normalize_req)
+    df["ReqNumber"]   = df["ReqNumber"].apply(_normalize_req)
+
     req_to_hire_name = (
         esf_reqs.dropna(subset=["Req #"])
                 .set_index("Req #")["Hire Name"]
@@ -351,7 +363,8 @@ def build_contractor_filled(filtered, ref):
         if "Hire Name" in esf_reqs.columns else {}
     )
     df["HireName"] = [
-        "" if pd.isna(req) else req_to_hire_name.get(req, "")
+        "" if (str(req).strip() == "" or str(req).strip().lower() == "nan")
+        else req_to_hire_name.get(req, "")
         for req in df["ReqNumber"]
     ]
     # ------------------------------------------------------------------
@@ -361,9 +374,10 @@ def build_contractor_filled(filtered, ref):
     date_for_contractor = get_three_days_pre_monday()
 
     def compute_status(req_num, start_date, hire_name: str) -> str:
-        if pd.isna(req_num):
+        req_str = _normalize_req(req_num)
+        if not req_str:
             return ""
-        in_reqs = req_num in req_exists_set  # ISERROR -> not in set
+        in_reqs = req_str in req_exists_set
         if not in_reqs:
             start = pd.to_datetime(start_date, errors="coerce")
             if pd.notna(start) and start < date_for_contractor:
@@ -444,21 +458,3 @@ if __name__ == "__main__":
     ref = load_reference_data(DEPTS_BUCKET)
     for name, df in ref.items():
         print(f"{name}: {len(df)} rows, columns: {list(df.columns)}")
-        # discovered = discover_files(BUCKET_NAME)
-    # local_files = download_all_files(BUCKET_NAME, discovered)
-    # filtered = filter_all_files(local_files)
-
-    # dept_codes = load_dept_codes(DEPTS_BUCKET, CC_ID_FILE)
-    # filtered["candidates"] = filter_candidates(local_files["candidates"], dept_codes)
-
-    # ref = load_reference_data(DEPTS_BUCKET)
-
-    # # --- Inspect reference column names before running build ---
-    # print("depts columns:", list(ref["depts"].columns))
-    # print("esf_all columns:", list(ref["esf_all"].columns))
-    # print("esf_reqs columns:", list(ref["esf_reqs"].columns))
-    # print("contractor_closed columns:", list(filtered["contractor_closed"].columns))
-
-    result = build_contractor_filled(filtered, ref)
-    with open('contractorfilledresult.csv', 'w') as f:
-        f.write(result.to_csv(index=False))
