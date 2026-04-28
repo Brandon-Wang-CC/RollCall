@@ -237,8 +237,160 @@ def build_crew_unfilled(filtered, ref):
     pass
 
 def build_crew_filled(filtered, ref):
-    # returns a DataFrame
-    pass
+
+    candidates = filtered["candidates"].copy()
+    esf_reqs = ref["esf_reqs"].copy()
+    depts = ref["depts"].copy()
+    status_map = ref["status"].copy()
+
+    # =========================
+    # Normalize keys
+    # =========================
+    candidates["Req #"] = pd.to_numeric(candidates["Req #"], errors="coerce")
+    esf_reqs["Req #"] = pd.to_numeric(esf_reqs["Req #"], errors="coerce")
+
+    req_check = set(esf_reqs["Req #"].dropna())
+
+    # =========================
+    # FILTER (exact Excel logic)
+    # =========================
+    valid_status = [
+        "Offer",
+        "Employment Agreement",
+        "Ready for Hire",
+        "Background Check",
+    ]
+
+    # ==========================================================
+    # !!! Instructions!B3 DATE LOGIC — FINAL REVIEW POINT !!!
+    # ==========================================================
+    control_date = pd.Timestamp.today().normalize()  # <-- REPLACE if needed
+    cutoff = control_date - pd.Timedelta(days=6)
+    # ==========================================================
+
+    start_dates = pd.to_datetime(candidates["Start Date"], errors="coerce")
+
+    mask = (
+            candidates["Req #"].isin(req_check)
+            & candidates["Candidate Status"].isin(valid_status)
+            & (
+                    (start_dates >= cutoff)
+                    | (start_dates.isna())
+            )
+    )
+
+    df = candidates.loc[mask].copy()
+
+    # =========================
+    # Cost Center (LEFT 4)
+    # =========================
+    df["Cost Center"] = (
+        df["Cost Center"].astype(str).str.strip().str[:4]
+    )
+    df["cc_id"] = pd.to_numeric(df["Cost Center"], errors="coerce")
+
+    # =========================
+    # Department (Depts A:B)
+    # =========================
+    depts_ab = depts.iloc[:, [0, 1]].copy()
+    depts_ab.columns = ["cc_id", "Department"]
+    df = df.merge(depts_ab, on="cc_id", how="left")
+
+    # =========================
+    # MD-2 (Depts E:F)
+    # =========================
+    depts_ef = depts.iloc[:, [4, 5]].copy()
+    depts_ef.columns = ["Department", "MD-2"]
+    df = df.merge(depts_ef, on="Department", how="left")
+
+    # =========================
+    # Status mapping
+    # =========================
+    status_map.columns = ["Full Status", "Short Status"]
+    df = df.merge(
+        status_map,
+        left_on="Candidate Status",
+        right_on="Full Status",
+        how="left"
+    )
+
+    # =========================
+    # Merge ESF REQS
+    # =========================
+    df = df.merge(
+        esf_reqs,
+        on="Req #",
+        how="left",
+        suffixes=("", "_req")
+    )
+
+    # =========================
+    # Existing vs New (EXACT)
+    # =========================
+    lookup_name = df["Hire Name_req"]
+    lookup_date = pd.to_datetime(df["Start Date_req"], errors="coerce")
+
+    hire_name = df["Candidate Name"]
+    start_date = pd.to_datetime(df["Start Date"], errors="coerce")
+
+    df["Existing v New"] = np.where(
+        df["Req #"].isna() | (df["Req #"] == 0),
+        "",
+        np.where(
+            lookup_name.astype(str) != hire_name.astype(str),
+            "Update",
+            np.where(
+                lookup_date != start_date,
+                "Update Date",
+                "Existing"
+            )
+        )
+    )
+
+    # =========================
+    # Management Type
+    # =========================
+    df["Management Type"] = np.where(
+        df.get("Job Level", "").astype(str).str.contains("M", na=False),
+        "Management",
+        "Non Management"
+    )
+
+    # =========================
+    # Static fields
+    # =========================
+    df["Worker Type"] = "Regular"
+    df["MD-1"] = "Manish Nagar (019067)"
+    df["Location"] = "Crew"
+
+    # =========================
+    # Final Output
+    # =========================
+    output = pd.DataFrame({
+        "Existing v New": df["Existing v New"],
+        "Department": df["Department"],
+        "Worker Type": df["Worker Type"],
+        "Job Code": df["Job Code_req"],
+        "Job Profile": df["Job Profile_req"],
+        "Cost Center": df["Cost Center"],
+        "Grade level": df.get("Job Level"),
+        "Management Type": df["Management Type"],
+        "Manager Name": df.get("Manager"),
+        "MD-1": df["MD-1"],
+        "MD-2": df["MD-2"],
+        "Status": df["Short Status"],
+        "Req #": df["Req #"],
+        "FTE": np.nan,
+        "Location": df["Location"],
+        "Hire Name": hire_name,
+        "Start Date": start_date,
+        "State": df.get("State"),
+        "Job Requisition Primary Location (Building)": df.get("Primary Location"),
+        "Job Requisition Additional Locations": np.nan,
+        "Comment": df["Comment_req"],
+    })
+
+    return output
 
 def build_contractor_unfilled(filtered, ref):
     # returns a DataFrame
