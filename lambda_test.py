@@ -319,7 +319,7 @@ def build_contractor_filled(filtered, ref):
 
     df["Department"] = [
         lookup_department(cc, mgr)
-        for cc, mgr in zip(df["Cost Center ID"], df["Manager Name"])
+        for cc, mgr in zip(df["CostCenter"], df["ManagerName"])
     ]
 
     # ------------------------------------------------------------------
@@ -429,6 +429,19 @@ def write_output_workbook(crew_unfilled, crew_filled, contractor_unfilled, contr
 # Main / Test
 # =========================
 if __name__ == "__main__":
+    # discovered = discover_files(BUCKET_NAME)
+    # local_files = download_all_files(BUCKET_NAME, discovered)
+    # filtered = filter_all_files(local_files)
+
+    # dept_codes = load_dept_codes(DEPTS_BUCKET, CC_ID_FILE)
+    # filtered["candidates"] = filter_candidates(local_files["candidates"], dept_codes)
+
+    # for name, df in filtered.items():
+    #     print(f"{name}: {len(df)} rows")
+
+    # ref = load_reference_data(DEPTS_BUCKET)
+    # for name, df in ref.items():
+    #     print(f"{name}: {len(df)} rows, columns: {list(df.columns)}")
     discovered = discover_files(BUCKET_NAME)
     local_files = download_all_files(BUCKET_NAME, discovered)
     filtered = filter_all_files(local_files)
@@ -436,9 +449,14 @@ if __name__ == "__main__":
     dept_codes = load_dept_codes(DEPTS_BUCKET, CC_ID_FILE)
     filtered["candidates"] = filter_candidates(local_files["candidates"], dept_codes)
 
-    for name, df in filtered.items():
-        print(f"{name}: {len(df)} rows")
-
     ref = load_reference_data(DEPTS_BUCKET)
-    for name, df in ref.items():
-        print(f"{name}: {len(df)} rows, columns: {list(df.columns)}")
+
+    # --- Inspect reference column names before running build ---
+    print("depts columns:", list(ref["depts"].columns))
+    print("esf_all columns:", list(ref["esf_all"].columns))
+    print("esf_reqs columns:", list(ref["esf_reqs"].columns))
+    print("contractor_closed columns:", list(filtered["contractor_closed"].columns))
+
+    result = build_contractor_filled(filtered, ref)
+    print(result.head())
+    print(result.dtypes)
