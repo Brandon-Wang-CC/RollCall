@@ -23,7 +23,6 @@ s3 = boto3.client("s3", region_name="us-east-1")
 # =========================
 BUCKET_NAME = "rollcall-s3-dev-67"
 DEPTS_BUCKET = "rollcall-s3-dev-depts-reference"
-DEPTS_FILE = "cc_id.csv"
 TMP_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "tmp")
 
 FILE_PREFIXES = {
@@ -166,7 +165,7 @@ def filter_candidates(local_path, dept_codes):
 # =========================
 # Reference Data
 # =========================
-ESF_WF_FILE = "ESF WF data file.xlsx"
+ESF_WF_FILE = "ESF WF data file ref.xlsx"
 CC_ID_FILE = "cc_id.csv"
 DEPTS_FILE = "depts.csv"
 STATUS_FILE = "status.csv"
@@ -665,6 +664,30 @@ def build_contractor_filled(filtered, ref):
     return result
 
 # =========================
+# Output Workbook
+# =========================
+OUTPUT_FILE = "ESF WF data file.xlsx"
+OUTPUT_KEY  = "ESF WF data file.xlsx"
+
+def write_output_workbook(crew_unfilled, crew_filled, contractor_unfilled, contractor_filled):
+    logger.info("Writing output workbook...")
+    output_path = os.path.join(TMP_DIR, OUTPUT_FILE)
+
+    with pd.ExcelWriter(output_path, engine="openpyxl") as writer:
+        crew_unfilled.to_excel(writer,       sheet_name="Crew Unfilled",       index=False)
+        crew_filled.to_excel(writer,         sheet_name="Crew Filled",         index=False)
+        contractor_unfilled.to_excel(writer, sheet_name="Contractor UnFilled", index=False)
+        contractor_filled.to_excel(writer,   sheet_name="Contractor Filled",   index=False)
+
+    logger.info(f"Output workbook written to '{output_path}'")
+
+    # Upload to S3, overwriting the previous version
+    s3.upload_file(output_path, DEPTS_BUCKET, OUTPUT_KEY)
+    logger.info(f"Uploaded '{OUTPUT_FILE}' to S3 bucket '{DEPTS_BUCKET}'")
+
+    return output_path
+
+# =========================
 # Main / Test
 # =========================
 if __name__ == "__main__":
@@ -686,6 +709,11 @@ if __name__ == "__main__":
     print(f"Crew Filled:         {len(crew_filled)} rows")
     print(f"Contractor Unfilled: {len(contractor_unfilled)} rows")
     print(f"Contractor Filled:   {len(contractor_filled)} rows")
+
+    output_path = write_output_workbook(
+        crew_unfilled, crew_filled, contractor_unfilled, contractor_filled
+    )
+    print(f"Output written to: {output_path}")
     
 """if __name__ == "__main__":
     discovered = discover_files(BUCKET_NAME)
