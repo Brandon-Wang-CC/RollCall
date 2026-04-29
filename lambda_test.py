@@ -452,68 +452,89 @@ def build_contractor_unfilled(filtered, ref):
     )
 
     rows = []
-    for _, row in df.iterrows():
-        req_num = row.get("Req #")
-        if pd.isna(req_num):
-            continue
-        req_num_str = str(req_num).strip()
+    for idx, row in df.iterrows():
+        try:
+            req_num = row.get("Req #")
+            if pd.isna(req_num):
+                logger.debug(f"Skipping row {idx}: missing Req #")
+                continue
+            req_num_str = str(req_num).strip()
+            if not req_num_str:
+                logger.debug(f"Skipping row {idx}: empty Req #")
+                continue
 
-        # Cost Center -> Department via cc_id
-        cost_center = row.get("Cost Center", "")
-        cost_center_num = pd.to_numeric(cost_center, errors="coerce")
-        dept_match = cc_id[cc_id["cc_id"] == cost_center_num]
-        department = dept_match.iloc[0]["subdepartment"] if not dept_match.empty else ""
+            # Cost Center -> Department via cc_id
+            cost_center = row.get("Cost Center", "")
+            if not cost_center:
+                logger.debug(f"Row {idx}: empty Cost Center")
+                department = ""
+            else:
+                try:
+                    cost_center_num = pd.to_numeric(cost_center, errors="coerce")
+                    if pd.isna(cost_center_num):
+                        logger.warning(f"Row {idx}: invalid Cost Center '{cost_center}', treating as empty")
+                        department = ""
+                    else:
+                        dept_match = cc_id[cc_id["cc_id"] == cost_center_num]
+                        department = dept_match.iloc[0]["subdepartment"] if not dept_match.empty else ""
+                except Exception as e:
+                    logger.error(f"Row {idx}: error processing Cost Center '{cost_center}': {e}")
+                    department = ""
 
-        # Department -> MD-2 via depts
-        md2_match = depts[depts["department"] == department]
-        md2 = md2_match.iloc[0]["MD-2"] if not md2_match.empty else ""
+            # Department -> MD-2 via depts
+            if not department:
+                md2 = ""
+            else:
+                md2_match = depts[depts["department"] == department]
+                md2 = md2_match.iloc[0]["MD-2"] if not md2_match.empty else ""
 
-        # Existing v New:
-        # Not in ESF Reqs -> "NEW"
-        # In ESF Reqs, Hire Name empty -> "Open"
-        # In ESF Reqs, Hire Name present -> "Filled"
-        if req_num_str not in req_exists_set:
-            existing_v_new = "NEW"
-        else:
-            esf_hire = req_to_hire.get(req_num_str, "")
-            existing_v_new = "Open" if (pd.isna(esf_hire) or esf_hire == "") else "Filled"
+            # Existing v New
+            if req_num_str not in req_exists_set:
+                existing_v_new = "NEW"
+            else:
+                esf_hire = req_to_hire.get(req_num_str, "")
+                existing_v_new = "Open" if (pd.isna(esf_hire) or esf_hire == "") else "Filled"
 
-        # State mapping
-        loc = str(row.get("LOC", "")).strip()
-        state = {"PA": "Pennsylvania", "TX": "Texas"}.get(loc, loc)
+            # State mapping
+            loc = str(row.get("LOC", "")).strip()
+            state = {"PA": "Pennsylvania", "TX": "Texas"}.get(loc, loc)
 
-        # Report Status -> short status
-        report_status = row.get("Status (Please Make a Selection from List)", "")
-        short_status  = status_map.get(str(report_status), "")
+            # Report Status -> short status
+            report_status = row.get("Status (Please Make a Selection from List)", "")
+            short_status = status_map.get(str(report_status), "")
 
-        rows.append({
-            "Existing v New":                              existing_v_new,
-            "Department":                                  department,
-            "Worker Type":                                 "Contractor" if cost_center else "",
-            "Job Code":                                    "",
-            "Job Profile":                                 row.get("Job Title (Standardized)", ""),
-            "Cost Center ID":                              cost_center,
-            "Grade Level":                                 "00" if req_num_str else "",
-            "Management":                                  "Non-Management" if req_num_str else "",
-            "Manager Name":                                row.get("Hiring Manager", ""),
-            "MD-1":                                        "Manish Nagar (019067)" if req_num_str else "",
-            "MD-2":                                        md2,
-            "Status":                                      short_status,
-            "Req #":                                       req_num_str,
-            "FTE":                                         1 if req_num_str else "",
-            "Location":                                    "",
-            "Note":                                        "",
-            "Hire Name":                                   "",
-            "Start Date":                                  "",
-            "State":                                       state,
-            "Job Requisition Primary Location (Building)": "",
-            "Job Requisition Additional Locations":        "",
-            "Comment":                                     "",
-            "Report Status":                               report_status,
-        })
+            rows.append({
+                "Existing v New":                              existing_v_new,
+                "Department":                                  department,
+                "Worker Type":                                 "Contractor" if cost_center else "",
+                "Job Code":                                    "",
+                "Job Profile":                                 row.get("Job Title (Standardized)", ""),
+                "Cost Center ID":                              cost_center,
+                "Grade Level":                                 "00" if req_num_str else "",
+                "Management":                                  "Non-Management" if req_num_str else "",
+                "Manager Name":                                row.get("Hiring Manager", ""),
+                "MD-1":                                        "Manish Nagar (019067)" if req_num_str else "",
+                "MD-2":                                        md2,
+                "Status":                                      short_status,
+                "Req #":                                       req_num_str,
+                "FTE":                                         1 if req_num_str else "",
+                "Location":                                    "",
+                "Note":                                        "",
+                "Hire Name":                                   "",
+                "Start Date":                                  "",
+                "State":                                       state,
+                "Job Requisition Primary Location (Building)": "",
+                "Job Requisition Additional Locations":        "",
+                "Comment":                                     "",
+                "Report Status":                               report_status,
+            })
+
+        except Exception as e:
+            logger.error(f"Error processing row {idx}: {e}")
+            continue  # Skip bad row
 
     result = pd.DataFrame(rows)
-    logger.info(f"Contractor Unfilled complete: {len(result)} rows")
+    logger.info(f"Contractor Unfilled complete: {len(result)} rows (skipped {len(df) - len(result)})")
     return result
 
 
