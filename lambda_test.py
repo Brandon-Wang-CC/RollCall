@@ -634,6 +634,7 @@ def build_contractor_filled(filtered, ref):
         state = {"PA": "Pennsylvania", "TX": "Texas"}.get(loc, loc)
 
         rows.append({
+            "Existing v New":                              "",
             "Status":                                      col_a_status,
             "Department":                                  department,
             "Worker Type":                                 "Contractor" if cost_center else "",
@@ -669,19 +670,125 @@ def build_contractor_filled(filtered, ref):
 OUTPUT_FILE = "ESF WF data file.xlsx"
 OUTPUT_KEY  = "ESF WF data file.xlsx"
 
+# Master column order for the combined output
+MASTER_COLUMNS = [
+    "Existing v New",
+    "Department",
+    "Worker Type",
+    "Job Code",
+    "Job Profile",
+    "Cost Center ID",
+    "Grade Level",
+    "Management",
+    "Manager Name",
+    "MD-1",
+    "MD-2",
+    "Status",
+    "Req #",
+    "FTE",
+    "Location",
+    "Note",
+    "Hire Name",
+    "Start Date",
+    "State",
+    "Job Requisition Primary Location (Building)",
+    "Job Requisition Additional Locations",
+    "Comment",
+    "Report Status",
+    "Contractor Req Status",
+    "Req Status",
+]
+
+def standardize_df(df):
+    # Rename columns to standardized names
+    rename_map = {
+        "Cost Center":     "Cost Center ID",
+        "Grade level":     "Grade Level",
+        "Management Type": "Management",
+    }
+    df = df.rename(columns=rename_map)
+
+    # Add any missing master columns as empty
+    for col in MASTER_COLUMNS:
+        if col not in df.columns:
+            df[col] = ""
+
+    # Return only master columns in order
+    return df[MASTER_COLUMNS]
+
 def write_output_workbook(crew_unfilled, crew_filled, contractor_unfilled, contractor_filled):
     logger.info("Writing output workbook...")
     output_path = os.path.join(TMP_DIR, OUTPUT_FILE)
 
+    # =========================
+    # Step 1 — Load previous run from S3
+    # =========================
+    try:
+        logger.info("Loading previous ESF WF data file from S3...")
+        response = s3.get_object(Bucket=DEPTS_BUCKET, Key=OUTPUT_KEY)
+        esf_bytes = io.BytesIO(response["Body"].read())
+        
+        # Check which sheet exists — first run will have "Reqs", subsequent runs "Output"
+        xl = pd.ExcelFile(esf_bytes)
+        if "Output" in xl.sheet_names:
+            prev_df = pd.read_excel(xl, sheet_name="Output")
+            logger.info("Found 'Output' sheet from previous run")
+        elif "Reqs" in xl.sheet_names:
+            prev_df = pd.read_excel(xl, sheet_name="Reqs")
+            logger.info("Found 'Reqs' sheet — treating as first run")
+        else:
+            logger.info("No recognized sheet found — starting fresh")
+            prev_df = pd.DataFrame(columns=MASTER_COLUMNS)
+
+        prev_df["Req #"] = prev_df["Req #"].astype(str).str.strip()
+        logger.info(f"Loaded {len(prev_df)} rows from previous run")
+    except s3.exceptions.NoSuchKey:
+        logger.info("No previous file found in S3 — starting fresh")
+        prev_df = pd.DataFrame(columns=MASTER_COLUMNS)
+
+    # =========================
+    # Step 2 — Standardize and combine new data
+    # =========================
+    new_df = pd.concat([
+        standardize_df(crew_unfilled),
+        standardize_df(crew_filled),
+        standardize_df(contractor_unfilled),
+        standardize_df(contractor_filled),
+    ], ignore_index=True)
+    new_df["Req #"] = new_df["Req #"].astype(str).str.strip()
+    logger.info(f"New data: {len(new_df)} rows")
+
+    # =========================
+    # Step 3 — Merge previous and new data
+    # Prefer new data where Req # exists in both
+    # Keep old rows for Req #s no longer in active reports
+    # =========================
+    new_req_nums = set(new_df["Req #"].dropna())
+
+    # Keep rows from previous run that are NOT in the new data
+    carried_forward = prev_df[~prev_df["Req #"].isin(new_req_nums)].copy()
+    carried_forward["Existing v New"] = "Carried Forward"
+    logger.info(f"Carried forward from previous run: {len(carried_forward)} rows")
+
+    # Combine: new data first, then carried forward rows
+    combined = pd.concat([new_df, carried_forward], ignore_index=True)
+
+    # Ensure all master columns exist
+    for col in MASTER_COLUMNS:
+        if col not in combined.columns:
+            combined[col] = ""
+
+    combined = combined[MASTER_COLUMNS]
+    logger.info(f"Combined total: {len(combined)} rows")
+
+    # =========================
+    # Step 4 — Write and upload
+    # =========================
     with pd.ExcelWriter(output_path, engine="openpyxl") as writer:
-        crew_unfilled.to_excel(writer,       sheet_name="Crew Unfilled",       index=False)
-        crew_filled.to_excel(writer,         sheet_name="Crew Filled",         index=False)
-        contractor_unfilled.to_excel(writer, sheet_name="Contractor UnFilled", index=False)
-        contractor_filled.to_excel(writer,   sheet_name="Contractor Filled",   index=False)
+        combined.to_excel(writer, sheet_name="Output", index=False)
 
     logger.info(f"Output workbook written to '{output_path}'")
 
-    # Upload to S3, overwriting the previous version
     s3.upload_file(output_path, DEPTS_BUCKET, OUTPUT_KEY)
     logger.info(f"Uploaded '{OUTPUT_FILE}' to S3 bucket '{DEPTS_BUCKET}'")
 
@@ -704,6 +811,9 @@ if __name__ == "__main__":
     crew_filled         = build_crew_filled(filtered, ref)
     contractor_unfilled = build_contractor_unfilled(filtered, ref)
     contractor_filled   = build_contractor_filled(filtered, ref)
+    
+    for name, df in filtered.items():
+        print(f"{name}: {len(df)} rows")
 
     print(f"Crew Unfilled:       {len(crew_unfilled)} rows")
     print(f"Crew Filled:         {len(crew_filled)} rows")
