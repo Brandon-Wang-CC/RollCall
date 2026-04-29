@@ -5,6 +5,7 @@ import io
 import botocore.exceptions
 import os
 import pandas as pd
+from datetime import datetime, timedelta
 
 # =========================
 # Logging
@@ -215,8 +216,6 @@ def load_reference_data(bucket_name):
 # Build Green Sheets
 # =========================    
 
-from datetime import datetime, timedelta
-
 # =========================
 # Build Crew Unfilled
 # =========================
@@ -321,7 +320,7 @@ def build_crew_filled(filtered, ref):
     status_map = dict(zip(status_df["status"], status_df["short status"]))
 
     # Cutoff date: Instructions!$B$3 - 6 days = today - 6
-    cutoff_date = pd.Timestamp.today() - pd.Timedelta(days=10)
+    cutoff_date = pd.Timestamp.today() - pd.Timedelta(days=6)
 
     # Extract numeric req number from first 7 chars of Job Requisition
     candidates["req_int"] = pd.to_numeric(
