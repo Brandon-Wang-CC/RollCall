@@ -1,5 +1,3 @@
-from datetime import datetime, timedelta
-import numpy as np
 import json
 import logging
 import boto3
@@ -7,7 +5,6 @@ import io
 import botocore.exceptions
 import os
 import pandas as pd
-import sys
 
 # =========================
 # Logging
@@ -198,10 +195,7 @@ def load_reference_data(bucket_name):
 
     esf_reqs_df = pd.read_excel(esf_bytes, sheet_name="Reqs")
     esf_reqs_df = esf_reqs_df.loc[:, ~esf_reqs_df.columns.str.startswith("Unnamed")]
-    esf_reqs_df["Req #"] = esf_reqs_df["Req #"].astype(str).str.strip()
-    # esf_reqs_df = pd.read_excel(esf_bytes, sheet_name="Reqs")
-    # esf_reqs_df = esf_reqs_df.loc[:, ~esf_reqs_df.columns.str.startswith("Unnamed")]
-    # esf_reqs_df["Req #"] = pd.to_numeric(esf_reqs_df["Req #"], errors="coerce")
+    esf_reqs_df["Req #"] = pd.to_numeric(esf_reqs_df["Req #"], errors="coerce")
     logger.info(f"Loaded ESF WF Reqs: {len(esf_reqs_df)} rows")
 
     esf_bytes.seek(0)  # Reset the byte stream before reading again
@@ -216,387 +210,485 @@ def load_reference_data(bucket_name):
         "esf_reqs": esf_reqs_df,
         "esf_all":  esf_all_df,
     }
-
-# =========================
-# Three days pre monday for Status
-# =========================
-def get_three_days_pre_monday():
-    today = datetime.now()
-    # Calculate days since last Monday (0=Monday, 6=Sunday)
-    days_since_monday = (today.weekday() - 0) % 7
-    last_monday = today - timedelta(days=days_since_monday)
-    three_days_pre_monday = last_monday - timedelta(days=3)
-    return three_days_pre_monday
-
+    
 # =========================
 # Build Green Sheets
 # =========================    
 
+from datetime import datetime, timedelta
+
+# =========================
+# Build Crew Unfilled
+# =========================
 def build_crew_unfilled(filtered, ref):
-    # returns a DataFrame
-    pass
-
-def build_crew_filled(filtered, ref):
-
+    logger.info("Building Crew Unfilled...")
+    df         = filtered["unfilled"].copy()
     candidates = filtered["candidates"].copy()
-    esf_reqs = ref["esf_reqs"].copy()
-    depts = ref["depts"].copy()
-    status_map = ref["status"].copy()
+    esf_reqs   = ref["esf_reqs"].copy()
+    cc_id      = ref["cc_id"].copy()
+    depts      = ref["depts"].copy()
 
-    # =========================
-    # Normalize keys
-    # =========================
-    candidates["Req #"] = pd.to_numeric(candidates["Req #"], errors="coerce")
+    # ESF Reqs req numbers as integers for lookup
     esf_reqs["Req #"] = pd.to_numeric(esf_reqs["Req #"], errors="coerce")
+    req_check = set(esf_reqs["Req #"].dropna().astype(int))
 
-    req_check = set(esf_reqs["Req #"].dropna())
-
-    # =========================
-    # FILTER (exact Excel logic)
-    # =========================
-    valid_status = [
-        "Offer",
-        "Employment Agreement",
-        "Ready for Hire",
-        "Background Check",
-    ]
-
-    # ==========================================================
-    # !!! Instructions!B3 DATE LOGIC — FINAL REVIEW POINT !!!
-    # ==========================================================
-    control_date = pd.Timestamp.today().normalize()  # <-- REPLACE if needed
-    cutoff = control_date - pd.Timedelta(days=6)
-    # ==========================================================
-
-    start_dates = pd.to_datetime(candidates["Start Date"], errors="coerce")
-
-    mask = (
-            candidates["Req #"].isin(req_check)
-            & candidates["Candidate Status"].isin(valid_status)
-            & (
-                    (start_dates >= cutoff)
-                    | (start_dates.isna())
-            )
+    # Prep candidates for hire name lookup
+    # Extract numeric req number from first 7 chars of Job Requisition
+    candidates["req_int"] = pd.to_numeric(
+        candidates["Job Requisition"].astype(str).str.strip().str[:7],
+        errors="coerce"
     )
 
-    df = candidates.loc[mask].copy()
+    rows = []
+    for _, row in df.iterrows():
+        req_num = row.get("Requisition Number")
+        if pd.isna(req_num):
+            continue
+        req_num_int = int(req_num)
 
-    # =========================
-    # Cost Center (LEFT 4)
-    # =========================
-    df["Cost Center"] = (
-        df["Cost Center"].astype(str).str.strip().str[:4]
+        # Cost Center -> Department (subdepartment) via cc_id
+        cost_center = row.get("Cost Center ID", "")
+        cost_center_num = pd.to_numeric(cost_center, errors="coerce")
+        dept_match = cc_id[cc_id["cc_id"] == cost_center_num]
+        department = dept_match.iloc[0]["subdepartment"] if not dept_match.empty else ""
+
+        # Department -> MD-2 via depts
+        md2_match = depts[depts["department"] == department]
+        md2 = md2_match.iloc[0]["MD-2"] if not md2_match.empty else ""
+
+        # Existing v New: if req # in ESF Reqs -> "Existing", else "NEW"
+        existing_v_new = "Existing" if req_num_int in req_check else "NEW"
+
+        # Grade level and Management Type
+        grade_level = row.get("Grade Grouping - GTA", "")
+        grade_str   = str(grade_level) if pd.notna(grade_level) else ""
+        management_type = "Management" if "M" in grade_str else "Non Management"
+
+        # Hire Name: find candidate with "Ready for Hire" for this req
+        hire_match = candidates[
+            (candidates["req_int"] == req_num_int) &
+            (candidates["Candidate Status"] == "Ready for Hire")
+        ]
+        hire_name = hire_match.iloc[0]["Candidate Name"] if not hire_match.empty else ""
+
+        rows.append({
+            "Existing v New":                              existing_v_new,
+            "Department":                                  department,
+            "Worker Type":                                 "Regular",
+            "Job Code":                                    row.get("ID", ""),
+            "Job Profile":                                 row.get("Job Profile Name", ""),
+            "Cost Center":                                 cost_center,
+            "Grade level":                                 grade_level,
+            "Management Type":                             management_type,
+            "Manager Name":                                row.get("Hiring Manager Name", ""),
+            "MD-1":                                        "Manish Nagar (019067)",
+            "MD-2":                                        md2,
+            "Status":                                      row.get("Job Requisition Status", ""),
+            "Req #":                                       req_num_int,
+            "FTE":                                         row.get("Number of Openings Total", ""),
+            "Location":                                    "",
+            "Note":                                        "",
+            "Hire Name":                                   hire_name,
+            "Start Date":                                  "",
+            "State":                                       row.get("State", ""),
+            "Job Requisition Primary Location (Building)": row.get("Job Requisition Primary Location (Building)", ""),
+            "Job Requisition Additional Locations":        row.get("Job Requisition Additional Locations", ""),
+            "Comment":                                     "",
+        })
+
+    result = pd.DataFrame(rows)
+    logger.info(f"Crew Unfilled complete: {len(result)} rows")
+    return result
+
+
+# =========================
+# Build Crew Filled
+# =========================
+def build_crew_filled(filtered, ref):
+    logger.info("Building Crew Filled...")
+    candidates = filtered["candidates"].copy()
+    esf_reqs   = ref["esf_reqs"].copy()
+    cc_id      = ref["cc_id"].copy()
+    depts      = ref["depts"].copy()
+    status_df  = ref["status"].copy()
+
+    # ESF Reqs req numbers as integers — no duplicates confirmed
+    esf_reqs["Req #"] = pd.to_numeric(esf_reqs["Req #"], errors="coerce")
+    req_check = set(esf_reqs["Req #"].dropna().astype(int))
+    esf_reqs_indexed = esf_reqs.dropna(subset=["Req #"]).set_index("Req #")
+
+    # Status mapping: Candidate Status -> short status
+    status_map = dict(zip(status_df["status"], status_df["short status"]))
+
+    # Cutoff date: Instructions!$B$3 - 6 days = today - 6
+    cutoff_date = pd.Timestamp.today() - pd.Timedelta(days=10)
+
+    # Extract numeric req number from first 7 chars of Job Requisition
+    candidates["req_int"] = pd.to_numeric(
+        candidates["Job Requisition"].astype(str).str.strip().str[:7],
+        errors="coerce"
     )
-    df["cc_id"] = pd.to_numeric(df["Cost Center"], errors="coerce")
 
-    # =========================
-    # Department (Depts A:B)
-    # =========================
-    depts_ab = depts.iloc[:, [0, 1]].copy()
-    depts_ab.columns = ["cc_id", "Department"]
-    df = df.merge(depts_ab, on="cc_id", how="left")
+    # Filter candidates:
+    # 1. req_int in req_check (Req Check list = ESF Reqs req numbers)
+    # 2. Candidate Status in target statuses
+    # 3. Candidate Start Date >= cutoff OR Start Date is 0/NaN
+    start_dates = pd.to_datetime(candidates["Candidate Start Date"], errors="coerce")
+    df = candidates[
+        candidates["req_int"].isin(req_check) &
+        candidates["Candidate Status"].isin([
+            "Offer", "Employment Agreement", "Ready for Hire", "Background Check"
+        ]) &
+        ((start_dates >= cutoff_date) | (candidates["Candidate Start Date"] == 0) | start_dates.isna())
+    ].copy()
 
-    # =========================
-    # MD-2 (Depts E:F)
-    # =========================
-    depts_ef = depts.iloc[:, [4, 5]].copy()
-    depts_ef.columns = ["Department", "MD-2"]
-    df = df.merge(depts_ef, on="Department", how="left")
+    rows = []
+    for _, row in df.iterrows():
+        req_num = row.get("req_int")
+        if pd.isna(req_num):
+            continue
+        req_num_int = int(req_num)
 
-    # =========================
-    # Status mapping
-    # =========================
-    status_map.columns = ["Full Status", "Short Status"]
-    df = df.merge(
-        status_map,
-        left_on="Candidate Status",
-        right_on="Full Status",
-        how="left"
-    )
+        # Cost Center: LEFT 4 of Cost Center column
+        cost_center_4 = str(row.get("Cost Center", "")).strip()[:4]
+        cost_center_num = pd.to_numeric(cost_center_4, errors="coerce")
 
-    # =========================
-    # Merge ESF REQS
-    # =========================
-    df = df.merge(
-        esf_reqs,
-        on="Req #",
-        how="left",
-        suffixes=("", "_req")
-    )
+        # Cost Center -> Department
+        dept_match = cc_id[cc_id["cc_id"] == cost_center_num]
+        department = dept_match.iloc[0]["subdepartment"] if not dept_match.empty else ""
 
-    # =========================
-    # Existing vs New (EXACT)
-    # =========================
-    lookup_name = df["Hire Name_req"]
-    lookup_date = pd.to_datetime(df["Start Date_req"], errors="coerce")
+        # Department -> MD-2
+        md2_match = depts[depts["department"] == department]
+        md2 = md2_match.iloc[0]["MD-2"] if not md2_match.empty else ""
 
-    hire_name = df["Candidate Name"]
-    start_date = pd.to_datetime(df["Start Date"], errors="coerce")
+        # Current row values
+        hire_name  = row.get("Candidate Name", "")
+        start_date = row.get("Candidate Start Date", "")
 
-    df["Existing v New"] = np.where(
-        df["Req #"].isna() | (df["Req #"] == 0),
-        "",
-        np.where(
-            lookup_name.astype(str) != hire_name.astype(str),
-            "Update",
-            np.where(
-                lookup_date != start_date,
-                "Update Date",
-                "Existing"
-            )
-        )
-    )
+        # ESF Reqs lookup for Job Code, Job Profile, Comment, and Existing v New
+        if req_num_int in esf_reqs_indexed.index:
+            esf_row     = esf_reqs_indexed.loc[req_num_int]
+            job_code    = esf_row.get("Job Code", "")
+            job_profile = esf_row.get("Job Profile", "")
+            comment     = esf_row.get("Comment", "")
+            esf_hire    = esf_row.get("Hire Name", "")
+            esf_start   = esf_row.get("Start Date", "")
 
-    # =========================
-    # Management Type
-    # =========================
-    df["Management Type"] = np.where(
-        df.get("Job Level", "").astype(str).str.contains("M", na=False),
-        "Management",
-        "Non Management"
-    )
+            # Existing v New:
+            # Compare current Hire Name vs ESF Hire Name (col P = 5th from L)
+            # Compare current Start Date vs ESF Start Date (col Q = 6th from L)
+            if str(esf_hire) != str(hire_name):
+                existing_v_new = "Update"
+            elif str(esf_start) != str(start_date):
+                existing_v_new = "Update Date"
+            else:
+                existing_v_new = "Existing"
+        else:
+            job_code       = ""
+            job_profile    = ""
+            comment        = ""
+            existing_v_new = "Existing"
 
-    # =========================
-    # Static fields
-    # =========================
-    df["Worker Type"] = "Regular"
-    df["MD-1"] = "Manish Nagar (019067)"
-    df["Location"] = "Crew"
+        # Status: Candidate Status -> short status
+        short_status = status_map.get(row.get("Candidate Status", ""), "")
 
-    # =========================
-    # Final Output
-    # =========================
-    output = pd.DataFrame({
-        "Existing v New": df["Existing v New"],
-        "Department": df["Department"],
-        "Worker Type": df["Worker Type"],
-        "Job Code": df["Job Code_req"],
-        "Job Profile": df["Job Profile_req"],
-        "Cost Center": df["Cost Center"],
-        "Grade level": df.get("Job Level"),
-        "Management Type": df["Management Type"],
-        "Manager Name": df.get("Manager"),
-        "MD-1": df["MD-1"],
-        "MD-2": df["MD-2"],
-        "Status": df["Short Status"],
-        "Req #": df["Req #"],
-        "FTE": np.nan,
-        "Location": df["Location"],
-        "Hire Name": hire_name,
-        "Start Date": start_date,
-        "State": df.get("State"),
-        "Job Requisition Primary Location (Building)": df.get("Primary Location"),
-        "Job Requisition Additional Locations": np.nan,
-        "Comment": df["Comment_req"],
-    })
+        # Grade level and Management Type
+        grade_level = row.get("Grade", "")
+        grade_str   = str(grade_level) if pd.notna(grade_level) else ""
+        management_type = "Management" if "M" in grade_str else "Non Management"
 
-    return output
+        rows.append({
+            "Existing v New":                              existing_v_new,
+            "Department":                                  department,
+            "Worker Type":                                 "Regular",
+            "Job Code":                                    job_code,
+            "Job Profile":                                 job_profile,
+            "Cost Center":                                 cost_center_4,
+            "Grade level":                                 grade_level,
+            "Management Type":                             management_type,
+            "Manager Name":                                row.get("Hiring Manager", ""),
+            "MD-1":                                        "Manish Nagar (019067)",
+            "MD-2":                                        md2,
+            "Status":                                      short_status,
+            "Req #":                                       req_num_int,
+            "FTE":                                         "",
+            "Location":                                    "Crew",
+            "Hire Name":                                   hire_name,
+            "Start Date":                                  start_date,
+            "State":                                       row.get("State", ""),
+            "Job Requisition Primary Location (Building)": row.get("Job Requisition Primary Location", ""),
+            "Job Requisition Additional Locations":        "",
+            "Comment":                                     comment,
+        })
 
+    result = pd.DataFrame(rows)
+    logger.info(f"Crew Filled complete: {len(result)} rows")
+    return result
+
+
+# =========================
+# Build Contractor Unfilled
+# =========================
 def build_contractor_unfilled(filtered, ref):
-    # returns a DataFrame
-    pass
+    logger.info("Building Contractor Unfilled...")
+    df        = filtered["contractor_open"].copy()
+    esf_reqs  = ref["esf_reqs"].copy()
+    cc_id     = ref["cc_id"].copy()
+    depts     = ref["depts"].copy()
+    status_df = ref["status"].copy()
 
-def build_contractor_filled(filtered, ref):
-    # returns a DataFrame
-    """
-       Converts the Excel "Contractor Filled" tab formulas into pandas logic.
+    # Clean column names
+    df.columns = [col.replace("\n", " ").strip() for col in df.columns]
 
-       All column-letter references below map to the Excel formula spec:
-         Col A = Status,  Col B = Department,  Col C = Worker Type,
-         Col E = Job Profile,  Col F = Cost Center,  Col G = Grade Level,
-         Col H = Management,  Col I = Manager Name,  Col J = MD-1,
-         Col K = MD-2,  Col L = Status (Short),  Col M = Req #,
-         Col N = FTE,  Col Q = Hire Name,  Col R = Start Date,
-         Col S = State,  Col W = Contractor Req Status
-       """
-    #Clones of the dataframes
-    cc = filtered["contractor_closed"].copy()
-    esf_reqs = ref["esf_reqs"].copy()
-    stats = ref["status"].copy()
-    df = pd.DataFrame(columns=['Status', 'Department', 'WorkerType', 'JobProfile', 'CostCenter', 'GradeLevel', 'Management', 'ManagerName', 'MD1', 'MD2', 'ReqNumber', 'HireName', 'StartDate', 'State', 'ContractorReqStatus', 'SecondStatus'])
+    # Status mapping
+    status_map = dict(zip(status_df["status"], status_df["short status"]))
 
-    # ------------------------------------------------------------------
-    # REQ NUMBER
-    # ------------------------------------------------------------------
-    df["ReqNumber"] = cc["Req #"].values
-    # ------------------------------------------------------------------
-    # COST CENTER
-    # ------------------------------------------------------------------
-    df["CostCenter"] = cc["Cost Center"].values
-    # ------------------------------------------------------------------
-    # Manager Name
-    # ------------------------------------------------------------------
-    df["ManagerName"] = cc["Hiring Manager"].values
-    # ------------------------------------------------------------------
-    # Job Profile
-    # ------------------------------------------------------------------
-    df["JobProfile"] = cc["Job Tile (Standardized)"].values
-    # ------------------------------------------------------------------
-    # Start Date
-    # ------------------------------------------------------------------
-    df["StartDate"] = cc["Start Date"].values
-    # ------------------------------------------------------------------
-    # State Check
-    # ------------------------------------------------------------------
-    df["State"] = cc["LOC"].values
-    # ------------------------------------------------------------------
-    # Contractor REQ Status Check?
-    # ------------------------------------------------------------------
-    df["ContractorReqStatus"] = cc['Status\n(Please Make a Selection from List)'].values
-
-    # ------------------------------------------------------------------
-    # Department
-    # ------------------------------------------------------------------
-    cc_id_df = ref["cc_id"].copy()
-    cc_id_df["cc_id"] = pd.to_numeric(cc_id_df["cc_id"], errors="coerce")
-    cc_to_subdept = cc_id_df.dropna(subset=["cc_id"]).set_index("cc_id")["subdepartment"].to_dict()
-
-        # --- ESF ALL: for Infosys override ---
-        # Formula: INDEX(ALL!$A:$R, MATCH(ManagerName, ALL!$R:$R, 0), 1)
-        # Col R in ALL (0-indexed col 17) = "Cost Center ##" in sample file.
-        # Matches Manager Name against that column and returns col A (Department).
-    esf_all = ref["esf_all"]
-    all_col_r_name = esf_all.columns[17]
-    infosys_lookup = (
-        esf_all.dropna(subset=[all_col_r_name])
-        .set_index(all_col_r_name)["Department"]
+    # ESF Reqs lookup as strings (contractor req numbers may be non-numeric)
+    esf_reqs["Req #"] = esf_reqs["Req #"].astype(str).str.strip()
+    req_exists_set = set(esf_reqs["Req #"].dropna())
+    req_to_hire = (
+        esf_reqs.dropna(subset=["Req #"])
+        .set_index("Req #")["Hire Name"]
         .to_dict()
+        if "Hire Name" in esf_reqs.columns else {}
     )
-    def lookup_department(cost_center, manager_name) -> str:
-        try:
-            cc_key = int(str(cost_center).strip()[:4])
-            subdept = cc_to_subdept.get(cc_key)
-            if subdept is None:
-                return ""
-            if subdept == "Infosys":
-                return infosys_lookup.get(manager_name, "")
-            return subdept
-        except (ValueError, TypeError):
-            return ""
 
-    df["Department"] = [
-        lookup_department(cc, mgr)
-        for cc, mgr in zip(df["CostCenter"], df["ManagerName"])
-    ]
+    rows = []
+    for _, row in df.iterrows():
+        req_num = row.get("Req #")
+        if pd.isna(req_num):
+            continue
+        req_num_str = str(req_num).strip()
 
-    _req_str = df["ReqNumber"].astype(str).str.strip()
-    req_not_blank = df["ReqNumber"].notna() & (_req_str != "") & (_req_str.str.lower() != "nan")
-    cc_not_blank  = df["CostCenter"].notna() & (df["CostCenter"].astype(str).str.strip() != "")
-    # ------------------------------------------------------------------
-    # Grade Level
-    # ------------------------------------------------------------------
-    df["GradeLevel"] = np.where(req_not_blank, "00", "")
-    # ------------------------------------------------------------------
-    # Management
-    # ------------------------------------------------------------------
-    df["Management"] = np.where(req_not_blank, "Non-Management", "")
-    # ------------------------------------------------------------------
-    # MD1
-    # ------------------------------------------------------------------
-    df["MD1"] = np.where(req_not_blank, "Manish Nagar (019067)", "")
-    # ------------------------------------------------------------------
-    # Worker Type
-    # ------------------------------------------------------------------
-    df["WorkerType"] = np.where(cc_not_blank, "Contractor", "")  # Test Case: What if this is something random that isn't blank or contractor?
- # ------------------------------------------------------------------
-    # Hire Name
-    # ------------------------------------------------------------------
-    def _normalize_req(val) -> str:
+        # Cost Center -> Department via cc_id
+        cost_center = row.get("Cost Center", "")
+        cost_center_num = pd.to_numeric(cost_center, errors="coerce")
+        dept_match = cc_id[cc_id["cc_id"] == cost_center_num]
+        department = dept_match.iloc[0]["subdepartment"] if not dept_match.empty else ""
+
+        # Department -> MD-2 via depts
+        md2_match = depts[depts["department"] == department]
+        md2 = md2_match.iloc[0]["MD-2"] if not md2_match.empty else ""
+
+        # Existing v New:
+        # Not in ESF Reqs -> "NEW"
+        # In ESF Reqs, Hire Name empty -> "Open"
+        # In ESF Reqs, Hire Name present -> "Filled"
+        if req_num_str not in req_exists_set:
+            existing_v_new = "NEW"
+        else:
+            esf_hire = req_to_hire.get(req_num_str, "")
+            existing_v_new = "Open" if (pd.isna(esf_hire) or esf_hire == "") else "Filled"
+
+        # State mapping
+        loc = str(row.get("LOC", "")).strip()
+        state = {"PA": "Pennsylvania", "TX": "Texas"}.get(loc, loc)
+
+        # Report Status -> short status
+        report_status = row.get("Status (Please Make a Selection from List)", "")
+        short_status  = status_map.get(str(report_status), "")
+
+        rows.append({
+            "Existing v New":                              existing_v_new,
+            "Department":                                  department,
+            "Worker Type":                                 "Contractor" if cost_center else "",
+            "Job Code":                                    "",
+            "Job Profile":                                 row.get("Job Title (Standardized)", ""),
+            "Cost Center ID":                              cost_center,
+            "Grade Level":                                 "00" if req_num_str else "",
+            "Management":                                  "Non-Management" if req_num_str else "",
+            "Manager Name":                                row.get("Hiring Manager", ""),
+            "MD-1":                                        "Manish Nagar (019067)" if req_num_str else "",
+            "MD-2":                                        md2,
+            "Status":                                      short_status,
+            "Req #":                                       req_num_str,
+            "FTE":                                         1 if req_num_str else "",
+            "Location":                                    "",
+            "Note":                                        "",
+            "Hire Name":                                   "",
+            "Start Date":                                  "",
+            "State":                                       state,
+            "Job Requisition Primary Location (Building)": "",
+            "Job Requisition Additional Locations":        "",
+            "Comment":                                     "",
+            "Report Status":                               report_status,
+        })
+
+    result = pd.DataFrame(rows)
+    logger.info(f"Contractor Unfilled complete: {len(result)} rows")
+    return result
+
+
+# =========================
+# Build Contractor Filled
+# =========================
+def build_contractor_filled(filtered, ref):
+    logger.info("Building Contractor Filled...")
+    df        = filtered["contractor_closed"].copy()
+    esf_reqs  = ref["esf_reqs"].copy()
+    cc_id     = ref["cc_id"].copy()
+    depts     = ref["depts"].copy()
+    status_df = ref["status"].copy()
+    esf_all   = ref["esf_all"].copy()
+
+    # Clean column names
+    df.columns = [col.replace("\n", " ").strip() for col in df.columns]
+    filled_col = "Filled: F Cancelled : C"
+    status_col = "Status (Please Make a Selection from List)"
+
+    # Apply filters:
+    # Start Date >= NOW()-10, Filled/Cancelled = "F" (case-insensitive)
+    cutoff_date = pd.Timestamp.today() - pd.Timedelta(days=10)
+    df["Start Date"] = pd.to_datetime(df["Start Date"], errors="coerce")
+    df = df[
+        (df["Start Date"] >= cutoff_date) &
+        (df[filled_col].astype(str).str.upper().str.strip() == "F")
+    ].copy()
+
+    # Status mapping
+    status_map = dict(zip(status_df["status"], status_df["short status"]))
+
+    # ESF Reqs lookup as strings (contractor req numbers may be non-numeric)
+    def _norm(val) -> str:
         s = str(val).strip()
         return "" if (not s or s.lower() == "nan") else s
 
-    esf_reqs["Req #"] = esf_reqs["Req #"].apply(_normalize_req)
-    df["ReqNumber"]   = df["ReqNumber"].apply(_normalize_req)
-
-    req_to_hire_name = (
+    esf_reqs["Req #"] = esf_reqs["Req #"].apply(_norm)
+    req_exists_set = set(esf_reqs["Req #"].dropna())
+    req_to_hire = (
         esf_reqs.dropna(subset=["Req #"])
-                .set_index("Req #")["Hire Name"]
-                .to_dict()
+        .set_index("Req #")["Hire Name"]
+        .to_dict()
         if "Hire Name" in esf_reqs.columns else {}
     )
-    df["HireName"] = [
-        "" if (str(req).strip() == "" or str(req).strip().lower() == "nan")
-        else req_to_hire_name.get(req, "")
-        for req in df["ReqNumber"]
-    ]
-    # ------------------------------------------------------------------
-    # Status Check
-    # ------------------------------------------------------------------
-    req_exists_set = set(esf_reqs["Req #"].dropna())
-    date_for_contractor = get_three_days_pre_monday()
 
-    def compute_status(req_num, start_date, hire_name: str) -> str:
-        req_str = _normalize_req(req_num)
-        if not req_str:
-            return ""
-        in_reqs = req_str in req_exists_set
-        if not in_reqs:
-            start = pd.to_datetime(start_date, errors="coerce")
-            if pd.notna(start) and start < date_for_contractor:
-                return "Validate if started"
-            return "NEW"
-        # Req exists: check Hire Name (col P / 5th from L)
-        return "Newly Filled" if not hire_name else "Filled"
-
-    df["Status"] = [
-        compute_status(req, sd, hn)
-        for req, sd, hn in zip(df["ReqNumber"], df["StartDate"], df["HireName"])
-    ]
-    # ------------------------------------------------------------------
-    # Second Status?
-    # ------------------------------------------------------------------
-    depts_df = ref["depts"]
-
-    # Status short (Col L): IFERROR(VLOOKUP(W5, Depts!K:L, 2, 0), "")
-    # Depts col K = "Status" (full text), col L = "Unnamed: 11" (short label)
-    status_map = (
-        stats.dropna(subset=["status"])
-        .set_index("status")["short status"]
+    # cc_id -> subdepartment
+    cc_id["cc_id"] = pd.to_numeric(cc_id["cc_id"], errors="coerce")
+    cc_to_subdept = (
+        cc_id.dropna(subset=["cc_id"])
+        .set_index("cc_id")["subdepartment"]
         .to_dict()
     )
-    df["SecondStatus"] = [status_map.get(str(s), "") for s in df["ContractorReqStatus"]]
 
-    # ------------------------------------------------------------------
-    # MD2
-    # ------------------------------------------------------------------
+    # department -> MD-2
     dept_to_md2 = (
-        depts_df.dropna(subset=["department"])
+        depts.dropna(subset=["department"])
         .set_index("department")["MD-2"]
         .to_dict()
     )
-    req_to_dept_head = (
-        df.dropna(subset=["Req #"])
-        .set_index("Req #")["Dept Head"]
+
+    # Infosys override: match Manager Name against ALL "Manager Name" -> Department
+    infosys_lookup = (
+        esf_all.dropna(subset=["Manager Name"])
+        .set_index("Manager Name")["Department"]
         .to_dict()
-        if "Dept Head" in df.columns else {}
     )
 
-    def compute_md2(status_a: str, dept: str, req_num) -> str:
-        if not status_a:
-            return ""
-        md2 = dept_to_md2.get(dept)
-        if md2 is None:  # ISERROR -> fallback to Dept Head from ContractorClosed
-            return str(req_to_dept_head.get(req_num, ""))
-        return str(md2)
+    rows = []
+    for _, row in df.iterrows():
+        req_num_str = _norm(row.get("Req #", ""))
+        if not req_num_str:
+            continue
 
-    df["MD2"] = [
-        compute_md2(st, dept, req)
-        for st, dept, req in zip(df["Status"], df["Department"], df["ReqNumber"])
-    ]
+        cost_center = row.get("Cost Center", "")
+        manager     = row.get("Hiring Manager", "")
+        start_date  = row.get("Start Date")
+        dept_head   = row.get("Dept Head", "")
 
-    #Final Return
-    return df
+        # Cost Center -> Department (handle Infosys case)
+        try:
+            cc_key  = int(str(cost_center).strip()[:4])
+            subdept = cc_to_subdept.get(cc_key)
+            if subdept is None:
+                department = ""
+            elif subdept == "Infosys":
+                department = infosys_lookup.get(manager, "Infosys")
+            else:
+                department = subdept
+        except (ValueError, TypeError):
+            department = ""
 
+        # Department -> MD-2, fallback to Dept Head from ContractorClosed
+        md2 = dept_to_md2.get(department)
+        md2 = str(md2) if md2 is not None else (str(dept_head) if dept_head else "")
 
+        # Hire Name from ESF Reqs lookup (col P = 5th from L = "Hire Name")
+        hire_name = req_to_hire.get(req_num_str, "")
 
-def write_output_workbook(crew_unfilled, crew_filled, contractor_unfilled, contractor_filled):
-    # writes single Excel workbook to /tmp and uploads to S3
-    pass
+        # Status Col A:
+        # Not in ESF Reqs: if Start Date < today -> "Validate if started", else "NEW"
+        # In ESF Reqs: Hire Name empty -> "Newly Filled", else "Filled"
+        if req_num_str not in req_exists_set:
+            col_a_status = (
+                "Validate if started"
+                if pd.notna(start_date) and start_date < pd.Timestamp.today()
+                else "NEW"
+            )
+        else:
+            col_a_status = "Newly Filled" if (pd.isna(hire_name) or hire_name == "") else "Filled"
+
+        # Contractor Req Status -> short status
+        contractor_status = row.get(status_col, "")
+        short_status      = status_map.get(str(contractor_status), "")
+
+        # State mapping
+        loc   = str(row.get("LOC", "")).strip()
+        state = {"PA": "Pennsylvania", "TX": "Texas"}.get(loc, loc)
+
+        rows.append({
+            "Status":                                      col_a_status,
+            "Department":                                  department,
+            "Worker Type":                                 "Contractor" if cost_center else "",
+            "Job Code":                                    "",
+            "Job Profile":                                 row.get("Job Tile (Standardized)", ""),
+            "Cost Center ID":                              cost_center,
+            "Grade Level":                                 "00" if req_num_str else "",
+            "Management":                                  "Non-Management" if req_num_str else "",
+            "Manager Name":                                manager,
+            "MD-1":                                        "Manish Nagar (019067)" if req_num_str else "",
+            "MD-2":                                        md2,
+            "Req Status":                                  short_status,
+            "Req #":                                       req_num_str,
+            "FTE":                                         1 if req_num_str else "",
+            "Location":                                    "",
+            "Note":                                        "",
+            "Hire Name":                                   hire_name,
+            "Start Date":                                  start_date,
+            "State":                                       state,
+            "Job Requisition Primary Location (Building)": "",
+            "Job Requisition Additional Locations":        "",
+            "Comment":                                     "",
+            "Contractor Req Status":                       contractor_status,
+        })
+
+    result = pd.DataFrame(rows)
+    logger.info(f"Contractor Filled complete: {len(result)} rows")
+    return result
 
 # =========================
 # Main / Test
 # =========================
 if __name__ == "__main__":
+    discovered  = discover_files(BUCKET_NAME)
+    local_files = download_all_files(BUCKET_NAME, discovered)
+    filtered    = filter_all_files(local_files)
+
+    dept_codes = load_dept_codes(DEPTS_BUCKET, CC_ID_FILE)
+    filtered["candidates"] = filter_candidates(local_files["candidates"], dept_codes)
+
+    ref = load_reference_data(DEPTS_BUCKET)
+
+    crew_unfilled       = build_crew_unfilled(filtered, ref)
+    crew_filled         = build_crew_filled(filtered, ref)
+    contractor_unfilled = build_contractor_unfilled(filtered, ref)
+    contractor_filled   = build_contractor_filled(filtered, ref)
+
+    print(f"Crew Unfilled:       {len(crew_unfilled)} rows")
+    print(f"Crew Filled:         {len(crew_filled)} rows")
+    print(f"Contractor Unfilled: {len(contractor_unfilled)} rows")
+    print(f"Contractor Filled:   {len(contractor_filled)} rows")
+    
+"""if __name__ == "__main__":
     discovered = discover_files(BUCKET_NAME)
     local_files = download_all_files(BUCKET_NAME, discovered)
     filtered = filter_all_files(local_files)
@@ -609,4 +701,4 @@ if __name__ == "__main__":
 
     ref = load_reference_data(DEPTS_BUCKET)
     for name, df in ref.items():
-        print(f"{name}: {len(df)} rows, columns: {list(df.columns)}")
+        print(f"{name}: {len(df)} rows, columns: {list(df.columns)}")"""
