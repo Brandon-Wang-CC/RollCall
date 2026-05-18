@@ -27,3 +27,5 @@ jobs:
         with:
           function-name: rollcall-lambda
           code-artifacts-dir: ./
+          handler: lambda_function.lambda_handler
+          runtime: python3.12
