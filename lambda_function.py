@@ -24,6 +24,7 @@ s3 = boto3.client("s3", region_name="us-east-1")
 BUCKET_NAME = "rollcall-s3-dev-67"
 DEPTS_BUCKET = "rollcall-s3-dev-depts-reference"
 TMP_DIR = "/tmp" if os.environ.get("AWS_EXECUTION_ENV") else os.path.join(os.path.dirname(os.path.abspath(__file__)), "tmp")
+RET_ADDR = ""
 
 FILE_PREFIXES = {
     "unfilled":   "ES&F_GR&S Unfilled Requisition Report",
@@ -809,9 +810,9 @@ def write_output_workbook(crew_unfilled, crew_filled, contractor_unfilled, contr
         combined.to_excel(writer, sheet_name="Output", index=False)
 
     logger.info(f"Output workbook written to '{output_path}'")
-
-    s3.upload_file(output_path, DEPTS_BUCKET, OUTPUT_KEY)
-    logger.info(f"Uploaded '{OUTPUT_FILE}' to S3 bucket '{DEPTS_BUCKET}'")
+    key = f"{RET_ADDR}/{OUTPUT_KEY}"
+    s3.upload_file(output_path, DEPTS_BUCKET, key)
+    logger.info(f"Uploaded '{OUTPUT_FILE}' to S3 bucket '{RET_ADDR}'")
 
     return output_path
 
@@ -821,6 +822,9 @@ def write_output_workbook(crew_unfilled, crew_filled, contractor_unfilled, contr
 
 def lambda_handler(event, context):
     logger.info("Lambda handler invoked")
+    logger.info(f"Event: {json.dumps(event, indent=2)}")
+    RET_ADDR = event["Records"][0]["body"]["retAddr"]
+    logger.info(f"Return address: {RET_ADDR}")
     discovered  = discover_files(BUCKET_NAME)
     local_files = download_all_files(BUCKET_NAME, discovered)
     filtered    = filter_all_files(local_files)
@@ -842,7 +846,13 @@ def lambda_handler(event, context):
     logger.info(f"Process complete. Output written to: {output_path}")
     return {
         "statusCode": 200,
-        "body": f"Success! Output written to S3."
+        "status": "success",
+        "body": json.dumps({
+            "message": "Headcount reconciliation complete",
+            "retAddr": RET_ADDR,
+            "bucket": DEPTS_BUCKET,
+            "key": OUTPUT_KEY
+        })
     }
 
 # =========================
