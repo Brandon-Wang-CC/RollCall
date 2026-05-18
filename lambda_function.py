@@ -17,22 +17,12 @@ logger.setLevel(logging.INFO)
 # AWS Clients
 # =========================
 s3 = boto3.client("s3", region_name="us-east-1")
-ses = boto3.client("ses", region_name="us-east-1")
-lambda_client = boto3.client(
-    "lambda",
-    config=Config(
-        connect_timeout=2,
-        read_timeout=2,
-        retries={"max_attempts": 1}
-    )
-)
 
 # =========================
 # Constants
 # =========================
 BUCKET_NAME = "rollcall-s3-dev-67"
 DEPTS_BUCKET = "rollcall-s3-dev-depts-reference"
-EMAIL_LAMBDA_NAME = "ses-emailer-function"
 TMP_DIR = "/tmp" if os.environ.get("AWS_EXECUTION_ENV") else os.path.join(os.path.dirname(os.path.abspath(__file__)), "tmp")
 
 FILE_PREFIXES = {
@@ -825,23 +815,12 @@ def write_output_workbook(crew_unfilled, crew_filled, contractor_unfilled, contr
 
     return output_path
 
-def notify_email_lambda(payload: dict) -> dict:
-    logger.info(f"Sending email notification: {payload}")
-    return lambda_client.invoke(
-        FunctionName=EMAIL_LAMBDA_NAME,
-        InvocationType="Event",  # async fire-and-forget
-        Payload=json.dumps(payload).encode("utf-8")
-    )
-
 # =========================
 # Lambda Function
 # =========================
 
 def lambda_handler(event, context):
     logger.info("Lambda handler invoked")
-    logger.info(f"Event: {json.dumps(event, indent=2)}")
-    ret_addr = event["Records"][0]["body"]["retAddr"]
-    logger.info(f"Return address: {ret_addr}")
     discovered  = discover_files(BUCKET_NAME)
     local_files = download_all_files(BUCKET_NAME, discovered)
     filtered    = filter_all_files(local_files)
@@ -860,26 +839,10 @@ def lambda_handler(event, context):
         crew_unfilled, crew_filled, contractor_unfilled, contractor_filled
     )
 
-
     logger.info(f"Process complete. Output written to: {output_path}")
-
-    notify_email_lambda({
-        "retAddr": ret_addr,
-        "subject": "Your report is ready",
-        "body": "Attached is your generated Excel report.",
-        "bucket": DEPTS_BUCKET,
-        "key": OUTPUT_KEY
-    })
-
     return {
         "statusCode": 200,
-        "status": "success",
-        "body": json.dumps({
-            "message": "Headcount reconciliation complete",
-            "retAddr": ret_addr,
-            "bucket": DEPTS_BUCKET,
-            "key": OUTPUT_KEY
-        })
+        "body": f"Success! Output written to S3."
     }
 
 # =========================
