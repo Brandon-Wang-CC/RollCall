@@ -21,15 +21,15 @@ s3 = boto3.client("s3", region_name="us-east-1")
 # =========================
 # Constants
 # =========================
-BUCKET_NAME = "rollcall-s3-dev-67"
+BUCKET_NAME = "rollcall-s3-csv"
 DEPTS_BUCKET = "rollcall-s3-dev-depts-reference"
 TMP_DIR = "/tmp" if os.environ.get("AWS_EXECUTION_ENV") else os.path.join(os.path.dirname(os.path.abspath(__file__)), "tmp")
 RET_ADDR = ""
 
 FILE_PREFIXES = {
-    "unfilled":   "ES&F_GR&S Unfilled Requisition Report",
-    "contractor": "NEW-IT Contractor-VG-Vendor Req Report-",
-    "candidates": "GR&S Candidate Flow Weekly Report",
+    "unfilled":   "csv/ES&F_GR&S Unfilled Requisition Report",
+    "contractor": "csv/NEW-IT Contractor-VG-Vendor Req Report-",
+    "candidates": "csv/GR&S Candidate Flow Weekly Report",
 }
 
 FILTER_CONFIG = {
