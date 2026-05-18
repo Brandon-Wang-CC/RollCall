@@ -24,7 +24,7 @@ s3 = boto3.client("s3", region_name="us-east-1")
 BUCKET_NAME = "rollcall-s3-dev-67"
 DEPTS_BUCKET = "rollcall-s3-dev-depts-reference"
 TMP_DIR = "/tmp" if os.environ.get("AWS_EXECUTION_ENV") else os.path.join(os.path.dirname(os.path.abspath(__file__)), "tmp")
-RET_ADDR = ""
+
 
 FILE_PREFIXES = {
     "unfilled":   "ES&F_GR&S Unfilled Requisition Report",
@@ -738,7 +738,7 @@ def standardize_df(df):
     # Return only master columns in order
     return df[MASTER_COLUMNS]
 
-def write_output_workbook(crew_unfilled, crew_filled, contractor_unfilled, contractor_filled):
+def write_output_workbook(crew_unfilled, crew_filled, contractor_unfilled, contractor_filled, ret_addr):
     logger.info("Writing output workbook...")
     output_path = os.path.join(TMP_DIR, OUTPUT_FILE)
 
@@ -810,9 +810,9 @@ def write_output_workbook(crew_unfilled, crew_filled, contractor_unfilled, contr
         combined.to_excel(writer, sheet_name="Output", index=False)
 
     logger.info(f"Output workbook written to '{output_path}'")
-    key = f"{RET_ADDR}/{OUTPUT_KEY}"
+    key = f"{ret_addr}/{OUTPUT_KEY}"
     s3.upload_file(output_path, DEPTS_BUCKET, key)
-    logger.info(f"Uploaded '{OUTPUT_FILE}' to S3 bucket '{RET_ADDR}'")
+    logger.info(f"Uploaded '{OUTPUT_FILE}' to S3 bucket '{ret_addr}'")
 
     return output_path
 
@@ -823,8 +823,8 @@ def write_output_workbook(crew_unfilled, crew_filled, contractor_unfilled, contr
 def lambda_handler(event, context):
     logger.info("Lambda handler invoked")
     logger.info(f"Event: {json.dumps(event, indent=2)}")
-    RET_ADDR = event["Records"][0]["body"]["retAddr"]
-    logger.info(f"Return address: {RET_ADDR}")
+    ret_addr = event["Records"][0]["body"]["retAddr"]
+    logger.info(f"Return address: {ret_addr}")
     discovered  = discover_files(BUCKET_NAME)
     local_files = download_all_files(BUCKET_NAME, discovered)
     filtered    = filter_all_files(local_files)
@@ -840,7 +840,7 @@ def lambda_handler(event, context):
     contractor_filled   = build_contractor_filled(filtered, ref)
 
     output_path = write_output_workbook(
-        crew_unfilled, crew_filled, contractor_unfilled, contractor_filled
+        crew_unfilled, crew_filled, contractor_unfilled, contractor_filled, ret_addr
     )
 
     logger.info(f"Process complete. Output written to: {output_path}")
@@ -849,7 +849,7 @@ def lambda_handler(event, context):
         "status": "success",
         "body": json.dumps({
             "message": "Headcount reconciliation complete",
-            "retAddr": RET_ADDR,
+            "retAddr": ret_addr,
             "bucket": DEPTS_BUCKET,
             "key": OUTPUT_KEY
         })
