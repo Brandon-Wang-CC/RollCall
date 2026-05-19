@@ -34,19 +34,19 @@ FILE_PREFIXES = {
 
 FILTER_CONFIG = {
     "unfilled": {
-        "sheet":          "Sheet1",
+        "sheet":          "Sheet",
         "anchor_columns": ["Subdivision", "Requisition Number"],
         "filter_column":  "Subdivision",
         "filter_value":   "Chief Information Security Office",
     },
     "contractor_open": {
-        "sheet":          "Open",
+        "sheet":          "Sheet",
         "anchor_columns": ["Sub-Division", "Req #"],
         "filter_column":  "Sub-Division",
         "filter_value":   "ES&F",
     },
     "contractor_closed": {
-        "sheet":          "Closed",
+        "sheet":          "Sheet",
         "anchor_columns": ["Sub-Division", "Req #"],
         "filter_column":  "Sub-Division",
         "filter_value":   "ES&F",
