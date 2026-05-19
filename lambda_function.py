@@ -552,7 +552,7 @@ def build_contractor_filled(filtered, ref):
     status_df = ref["status"].copy()
     esf_all   = ref["esf_all"].copy()
 
-    # Clean column names
+    # Clean column names FIRST before any filtering
     df.columns = [col.replace("\n", " ").strip() for col in df.columns]
     filled_col = "Filled: F Cancelled : C"
     status_col = "Status (Please Make a Selection from List)"
@@ -633,12 +633,10 @@ def build_contractor_filled(filtered, ref):
         md2 = dept_to_md2.get(department)
         md2 = str(md2) if md2 is not None else (str(dept_head) if dept_head else "")
 
-        # Hire Name from ESF Reqs lookup (col P = 5th from L = "Hire Name")
+        # Hire Name from ESF Reqs lookup
         hire_name = req_to_hire.get(req_num_str, "")
 
-        # Status Col A:
-        # Not in ESF Reqs: if Start Date < today -> "Validate if started", else "NEW"
-        # In ESF Reqs: Hire Name empty -> "Newly Filled", else "Filled"
+        # Status Col A
         if req_num_str not in req_exists_set:
             col_a_status = (
                 "Validate if started"
