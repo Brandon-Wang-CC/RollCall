@@ -21,7 +21,7 @@ s3 = boto3.client("s3", region_name="us-east-1")
 # =========================
 # Constants
 # =========================
-BUCKET_NAME = "rollcall-s3-csv"
+BUCKET_NAME = "rollcall-s3-dev-67"
 DEPTS_BUCKET = "rollcall-s3-dev-depts-reference"
 TMP_DIR = "/tmp" if os.environ.get("AWS_EXECUTION_ENV") else os.path.join(os.path.dirname(os.path.abspath(__file__)), "tmp")
 
