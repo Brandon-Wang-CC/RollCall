@@ -27,9 +27,10 @@ TMP_DIR = "/tmp" if os.environ.get("AWS_EXECUTION_ENV") else os.path.join(os.pat
 
 
 FILE_PREFIXES = {
-    "unfilled":   "ES&F_GR&S Unfilled Requisition Report",
-    "contractor": "NEW-IT Contractor-VG-Vendor Req Report-",
-    "candidates": "GR&S Candidate Flow Weekly Report",
+    "unfilled":          "ES&F_GR&S Unfilled Requisition Report",
+    "contractor_open":   "NEW-IT Contractor-VG-Vendor Req Report-Open",
+    "contractor_closed": "NEW-IT Contractor-VG-Vendor Req Report-Closed",
+    "candidates":        "GR&S Candidate Flow Weekly Report",
 }
 
 FILTER_CONFIG = {
@@ -125,9 +126,8 @@ def filter_all_files(local_files):
     logger.info("Starting filtering...")
     results = {}
     for name, config in FILTER_CONFIG.items():
-        source_key = "contractor" if "contractor" in name else name
         results[name] = load_and_filter(
-            local_files[source_key],
+            local_files[name],
             config["sheet"],
             config["anchor_columns"],
             config["filter_column"],
@@ -149,8 +149,8 @@ def load_dept_codes(bucket_name, key):
 
 def filter_candidates(local_path, dept_codes):
     logger.info("Filtering candidates file...")
-    header_row = find_header_row(local_path, ["Candidate Name", "Candidate Status"], sheet_name="Sheet1")
-    df = pd.read_excel(local_path, sheet_name="Sheet1", header=header_row - 1)
+    header_row = find_header_row(local_path, ["Candidate Name", "Candidate Status"], sheet_name="Sheet")
+    df = pd.read_excel(local_path, sheet_name="Sheet", header=header_row - 1)
 
     # Match cost center numerically, same as macro's LEFT(...,4)*1
     df["cc_match"] = pd.to_numeric(
@@ -883,7 +883,8 @@ if __name__ == "__main__":
     print(f"Contractor Filled:   {len(contractor_filled)} rows")
 
     output_path = write_output_workbook(
-        crew_unfilled, crew_filled, contractor_unfilled, contractor_filled
+        crew_unfilled, crew_filled, contractor_unfilled, contractor_filled,
+        ret_addr="test"
     )
     print(f"Output written to: {output_path}")
     
