@@ -823,7 +823,7 @@ def write_output_workbook(crew_unfilled, crew_filled, contractor_unfilled, contr
 def lambda_handler(event, context):
     logger.info("Lambda handler invoked")
     logger.info(f"Event: {json.dumps(event, indent=2)}")
-    ret_addr = event["Records"][0]["body"]["retAddr"]
+    ret_addr = json.loads(event["Records"][0].get("body", "{}")).get("retAddr")
     logger.info(f"Return address: {ret_addr}")
     discovered  = discover_files(BUCKET_NAME)
     local_files = download_all_files(BUCKET_NAME, discovered)
