@@ -27,9 +27,9 @@ TMP_DIR = "/tmp" if os.environ.get("AWS_EXECUTION_ENV") else os.path.join(os.pat
 
 
 FILE_PREFIXES = {
-    "unfilled":   "csv/ES&F_GR&S Unfilled Requisition Report",
-    "contractor": "csv/NEW-IT Contractor-VG-Vendor Req Report-",
-    "candidates": "csv/GR&S Candidate Flow Weekly Report",
+    "unfilled":   "ES&F_GR&S Unfilled Requisition Report",
+    "contractor": "NEW-IT Contractor-VG-Vendor Req Report-",
+    "candidates": "GR&S Candidate Flow Weekly Report",
 }
 
 FILTER_CONFIG = {
