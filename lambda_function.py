@@ -553,7 +553,14 @@ def build_contractor_filled(filtered, ref):
     esf_all   = ref["esf_all"].copy()
 
     # Clean column names FIRST before any filtering
-    df.columns = [col.replace("\n", " ").strip() for col in df.columns]
+    df.columns = [
+        col.replace("\n", " ").replace("\r", " ").strip()
+        if isinstance(col, str) else col
+        for col in df.columns
+    ]
+    logger.info(f"Contractor closed columns: {list(df.columns)}")  # temporary debug line
+
+    
     filled_col = "Filled: F Cancelled : C"
     status_col = "Status (Please Make a Selection from List)"
 
