@@ -60,7 +60,7 @@ def get_newest_file_by_prefix(bucket_name, prefix):
     response = s3.list_objects_v2(Bucket=bucket_name)
     matches = [
         obj for obj in response.get("Contents", [])
-        if obj["Key"].startswith(prefix) and obj["Key"].endswith(".xlsx")
+        if obj["Key"].startswith(prefix) and obj["Key"].endswith(".csv")
     ]
     if not matches:
         raise FileNotFoundError(f"No files found with prefix: {prefix}")
@@ -101,12 +101,15 @@ def download_all_files(bucket_name, discovered_files):
 # =========================
 def find_header_row(local_path, known_columns, sheet_name=None):
     logger.info(f"Searching for header row in '{local_path}'...")
-    df = pd.read_excel(local_path, sheet_name=sheet_name, header=None)
+    if local_path.endswith(".csv"):
+        df = pd.read_csv(local_path, header=None)
+    else:
+        df = pd.read_excel(local_path, sheet_name=sheet_name, header=None)
     for i, row in df.iterrows():
         if all(col in row.values for col in known_columns):
             logger.info(f"Header row found at row {i + 1}")
             return i + 1
-    raise ValueError(f"Could not find header row containing all of: {known_columns}")
+    raise ValueError(f"Could not find header row containing all of: {known_columns}") 
 
 # =========================
 # Filtering
@@ -114,7 +117,10 @@ def find_header_row(local_path, known_columns, sheet_name=None):
 def load_and_filter(local_path, sheet_name, anchor_columns, filter_column, filter_value):
     logger.info(f"Loading '{local_path}' sheet '{sheet_name}'...")
     header_row = find_header_row(local_path, anchor_columns, sheet_name)
-    df = pd.read_excel(local_path, sheet_name=sheet_name, header=header_row - 1)
+    if local_path.endswith(".csv"):
+        df = pd.read_csv(local_path, header=header_row - 1)
+    else:
+        df = pd.read_excel(local_path, sheet_name=sheet_name, header=header_row - 1)
     logger.info(f"Loaded {len(df)} rows, applying filter '{filter_column}' == '{filter_value}'...")
     filtered = df[df[filter_column] == filter_value]
     logger.info(f"Filter complete, {len(filtered)} rows remaining")
@@ -148,18 +154,16 @@ def load_dept_codes(bucket_name, key):
 
 def filter_candidates(local_path, dept_codes):
     logger.info("Filtering candidates file...")
-    header_row = find_header_row(local_path, ["Candidate Name", "Candidate Status"], sheet_name="Sheet1")
-    df = pd.read_excel(local_path, sheet_name="Sheet1", header=header_row - 1)
-
-    # Match cost center numerically, same as macro's LEFT(...,4)*1
+    header_row = find_header_row(local_path, ["Candidate Name", "Candidate Status"])
+    if local_path.endswith(".csv"):
+        df = pd.read_csv(local_path, header=header_row - 1)
+    else:
+        df = pd.read_excel(local_path, sheet_name="Sheet1", header=header_row - 1)
     df["cc_match"] = pd.to_numeric(
         df["Cost Center"].astype(str).str.strip().str[:4], errors="coerce"
     )
     filtered = df[df["cc_match"].isin(dept_codes)].drop(columns=["cc_match"])
-
-    # Drop completely empty rows (equivalent to what old macro's RemoveDuplicates was doing)
     filtered = filtered.dropna(how="all")
-
     logger.info(f"Candidates filter complete, {len(filtered)} rows remaining")
     return filtered
 
