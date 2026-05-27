@@ -35,19 +35,19 @@ FILE_PREFIXES = {
 
 FILTER_CONFIG = {
     "unfilled": {
-        "sheet":          "Sheet",
+        "sheet":          "Sheet1",
         "anchor_columns": ["Subdivision", "Requisition Number"],
         "filter_column":  "Subdivision",
         "filter_value":   "Chief Information Security Office",
     },
     "contractor_open": {
-        "sheet":          "Sheet",
+        "sheet":          "Open",
         "anchor_columns": ["Sub-Division", "Req #"],
         "filter_column":  "Sub-Division",
         "filter_value":   "ES&F",
     },
     "contractor_closed": {
-        "sheet":          "Sheet",
+        "sheet":          "Closed",
         "anchor_columns": ["Sub-Division", "Req #"],
         "filter_column":  "Sub-Division",
         "filter_value":   "ES&F",
@@ -149,7 +149,7 @@ def load_dept_codes(bucket_name, key):
 
 def filter_candidates(local_path, dept_codes):
     logger.info("Filtering candidates file...")
-    header_row = find_header_row(local_path, ["Candidate Name", "Candidate Status"], sheet_name="Sheet")
+    header_row = find_header_row(local_path, ["Candidate Name", "Candidate Status"], sheet_name="Sheet1")
     df = pd.read_excel(local_path, sheet_name="Sheet", header=header_row - 1)
 
     # Match cost center numerically, same as macro's LEFT(...,4)*1
