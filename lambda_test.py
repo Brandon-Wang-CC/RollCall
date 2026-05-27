@@ -20,7 +20,7 @@ s3 = boto3.client("s3", region_name="us-east-1")
 # =========================
 # Constants
 # =========================
-BUCKET_NAME = "rollcall-s3-dev-67"
+BUCKET_NAME = "rollcall-s3-csv"
 DEPTS_BUCKET = "rollcall-s3-dev-depts-reference"
 DEPTS_FILE = "cc_id.csv"
 TMP_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "tmp")
