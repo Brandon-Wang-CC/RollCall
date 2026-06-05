@@ -1,0 +1,200 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Description: IAM roles for all three RollCall Lambda functions
+
+Parameters:
+  CsvBucket:
+    Type: String
+    Description: S3 bucket for processed XLSX attachments
+  DeptsBucket:
+    Type: String
+    Description: S3 bucket for reference data and output workbook
+  SesBucket:
+    Type: String
+    Description: S3 bucket where SES delivers raw inbound emails
+
+Resources:
+
+  # ─── csvParser ───────────────────────────────────────────────────────────────
+
+  CSVParserRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName: csvParser-role
+      Path: /service-role/
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: lambda.amazonaws.com
+            Action: sts:AssumeRole
+      ManagedPolicyArns:
+        - arn:aws:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole
+      Policies:
+        - PolicyName: SNSANDS3
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Sid: VisualEditor0
+                Effect: Allow
+                Action:
+                  - s3:PutObject
+                  - s3:GetObject
+                Resource:
+                  - !Sub arn:aws:s3:::${SesBucket}/*
+                  - !Sub arn:aws:s3:::${CsvBucket}/*
+              - Effect: Allow
+                Action: s3:ListBucket
+                Resource: !Sub arn:aws:s3:::${CsvBucket}
+              - Effect: Allow
+                Action: s3:DeleteObject
+                Resource: !Sub arn:aws:s3:::${CsvBucket}/*
+              - Sid: VisualEditor1
+                Effect: Allow
+                Action: sns:Publish
+                Resource: !Sub arn:aws:sns:${AWS::Region}:${AWS::AccountId}:dataReceived
+        - PolicyName: SQS
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Sid: VisualEditor0
+                Effect: Allow
+                Action:
+                  - sqs:DeleteMessage
+                  - sqs:ReceiveMessage
+                  - sqs:GetQueueAttributes
+                Resource: !Sub arn:aws:sqs:${AWS::Region}:${AWS::AccountId}:CSV-Parser-queue
+
+  # ─── rollcall-lambda ─────────────────────────────────────────────────────────
+
+  RollCallLambdaRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName: rollcall-lambda-role
+      Path: /service-role/
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: lambda.amazonaws.com
+            Action: sts:AssumeRole
+      ManagedPolicyArns:
+        - arn:aws:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole
+        - arn:aws:iam::aws:policy/AmazonSQSFullAccess
+        - arn:aws:iam::aws:policy/AmazonS3FullAccess
+      Policies:
+        - PolicyName: RollCallS3AccessPolicy
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Effect: Allow
+                Action:
+                  - s3:GetObject
+                  - s3:ListBucket
+                  - s3:PutObject
+                Resource:
+                  - !Sub arn:aws:s3:::${CsvBucket}
+                  - !Sub arn:aws:s3:::${CsvBucket}/*
+                  - !Sub arn:aws:s3:::${DeptsBucket}
+                  - !Sub arn:aws:s3:::${DeptsBucket}/*
+        - PolicyName: SES-sendRawEmail
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Effect: Allow
+                Action:
+                  - ses:SendEmail
+                  - ses:SendRawEmail
+                Resource: '*'
+        - PolicyName: Lambda-invoke-ses-emailer-function
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Effect: Allow
+                Action: lambda:InvokeFunction
+                Resource: !Sub arn:aws:lambda:${AWS::Region}:${AWS::AccountId}:function:ses-emailer-function
+
+  # ─── ses-emailer-function ────────────────────────────────────────────────────
+
+  SESEmailerRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName: ses-emailer-function-role
+      Path: /service-role/
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: lambda.amazonaws.com
+            Action: sts:AssumeRole
+      ManagedPolicyArns:
+        - arn:aws:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole
+      Policies:
+        - PolicyName: SESnS3
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Effect: Allow
+                Action: s3:GetObject
+                Resource: !Sub arn:aws:s3:::${CsvBucket}/*
+              - Effect: Allow
+                Action: s3:GetObject
+                Resource: !Sub arn:aws:s3:::${DeptsBucket}/*
+              - Effect: Allow
+                Action: lambda:InvokeFunction
+                Resource: !Sub arn:aws:lambda:${AWS::Region}:${AWS::AccountId}:function:ses-emailer-function
+                Condition:
+                  ArnLike:
+                    AWS:SourceArn: !Sub arn:aws:s3:::${DeptsBucket}
+              - Effect: Allow
+                Action: ses:SendRawEmail
+                Resource: '*'
+
+  # ─── SES → S3 write role ─────────────────────────────────────────────────────
+
+  # Assumed by SES to deliver inbound emails to the SES staging bucket
+  SESWriteToS3Role:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName: SESWriteToS3
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: ses.amazonaws.com
+            Action: sts:AssumeRole
+            Condition:
+              StringEquals:
+                aws:SourceAccount: !Ref AWS::AccountId
+      Policies:
+        - PolicyName: WriteToSESBucket
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Effect: Allow
+                Action: s3:PutObject
+                Resource: !Sub arn:aws:s3:::${SesBucket}/*
+
+Outputs:
+  CSVParserRoleArn:
+    Value: !GetAtt CSVParserRole.Arn
+    Export:
+      Name: csvParser-role-arn
+
+  RollCallLambdaRoleArn:
+    Value: !GetAtt RollCallLambdaRole.Arn
+    Export:
+      Name: rollcall-lambda-role-arn
+
+  SESEmailerRoleArn:
+    Value: !GetAtt SESEmailerRole.Arn
+    Export:
+      Name: ses-emailer-role-arn
+
+  SESWriteToS3RoleArn:
+    Value: !GetAtt SESWriteToS3Role.Arn
+    Export:
+      Name: ses-write-to-s3-role-arn

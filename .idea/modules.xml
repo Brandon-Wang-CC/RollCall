@@ -2,7 +2,7 @@
 <project version="4">
   <component name="ProjectModuleManager">
     <modules>
-      <module fileurl="file://$PROJECT_DIR$/.idea/RollCall.iml" filepath="$PROJECT_DIR$/.idea/RollCall.iml" />
+      <module fileurl="file://$PROJECT_DIR$/.idea/rollcall-monorepo.iml" filepath="$PROJECT_DIR$/.idea/rollcall-monorepo.iml" />
     </modules>
   </component>
 </project>
