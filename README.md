@@ -39,8 +39,14 @@ The goal of the project is to reduce manual effort by automatically collecting, 
 
 ## Features Not Implemented
 
-- None
+- **Financial Data & Payroll Calculations:** The system does not integrate with core finance systems or perform any payroll cost evaluations.
 
+- **Intern and Co-op Tracking:** Data pipelines purposefully exclude tracking profiles for Vanguard interns or seasonal co-op students.
+
+- **Real-Time Data Refreshing:** The infrastructure is bounded to a weekly batch processing refresh cycle and does not stream live daily updates.
+
+- **Source System Write-Backs:** The system does not possess permissions to create, update, or delete entries within core Workday/HR sources.
+  
 ---
 
 ## Known Issues
