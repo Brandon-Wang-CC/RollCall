@@ -1,0 +1,50 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Transform: AWS::Serverless-2016-10-31
+Description: csvParser Lambda — parses raw inbound emails, extracts XLSX attachments to CsvBucket, publishes to SNS dataReceived
+
+# Handler: theLambda.lambda_handler
+# Trigger:  SQS CSV-Parser-queue (from SNS emailReceived)
+# On start: wipes CsvBucket, then re-uploads current attachments
+
+Parameters:
+  CsvBucket:
+    Type: String
+    Description: S3 bucket to write processed XLSX attachments to
+
+Resources:
+
+  CSVParserFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      FunctionName: csvParser
+      Handler: theLambda.lambda_handler
+      Runtime: python3.12
+      CodeUri: ./
+      MemorySize: 2048
+      Timeout: 300
+      Role: !Sub arn:aws:iam::${AWS::AccountId}:role/service-role/csvParser-role
+      Layers:
+        - !Sub arn:aws:lambda:${AWS::Region}:336392948345:layer:AWSSDKPandas-Python314:7
+      Environment:
+        Variables:
+          SNS_TOPIC_ARN: !Sub arn:aws:sns:${AWS::Region}:${AWS::AccountId}:dataReceived
+          CSV_BUCKET: !Ref CsvBucket
+      Architectures:
+        - x86_64
+      EphemeralStorage:
+        Size: 1024
+      Events:
+        SQSTrigger:
+          Type: SQS
+          Properties:
+            Queue: !Sub arn:aws:sqs:${AWS::Region}:${AWS::AccountId}:CSV-Parser-queue
+            BatchSize: 10
+      LoggingConfig:
+        LogFormat: Text
+        LogGroup: /aws/lambda/csvParser
+
+Outputs:
+  CSVParserFunctionArn:
+    Value: !GetAtt CSVParserFunction.Arn
+    Export:
+      Name: csvParser-function-arn
