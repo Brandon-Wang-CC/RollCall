@@ -1,0 +1,67 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Description: S3 buckets for the RollCall ETL pipeline
+
+Parameters:
+  CsvBucket:
+    Type: String
+    Description: S3 bucket for processed XLSX attachments (csvParser writes, rollcall-lambda reads)
+  DeptsBucket:
+    Type: String
+    Description: S3 bucket for reference data and output workbook
+  SesBucket:
+    Type: String
+    Description: S3 bucket where SES delivers raw inbound emails
+
+Resources:
+
+  # Receives processed XLSX attachments from csvParser; read by rollcall-lambda
+  RollCallCSVBucket:
+    Type: AWS::S3::Bucket
+    Properties:
+      BucketName: !Ref CsvBucket
+      VersioningConfiguration:
+        Status: Enabled
+      LifecycleConfiguration:
+        Rules:
+          - Id: rollcall-auto-delete-30-days
+            Status: Enabled
+            ExpirationInDays: 30
+
+
+  # Holds reference CSVs and output XLSX; S3 event on .xlsx triggers ses-emailer-function
+  RollCallDeptsBucket:
+    Type: AWS::S3::Bucket
+    Properties:
+      BucketName: !Ref DeptsBucket
+      NotificationConfiguration:
+        LambdaConfigurations:
+          - Id: doneProcessing
+            Event: s3:ObjectCreated:Put
+            Filter:
+              S3Key:
+                Rules:
+                  - Name: suffix
+                    Value: xlsx
+            Function: !Sub arn:aws:lambda:${AWS::Region}:${AWS::AccountId}:function:ses-emailer-function
+
+  # Raw inbound email storage; SES delivers here, csvParser reads from here
+  RollCallSESBucket:
+    Type: AWS::S3::Bucket
+    Properties:
+      BucketName: !Ref SesBucket
+
+Outputs:
+  CSVBucketName:
+    Value: !Ref RollCallCSVBucket
+    Export:
+      Name: !Ref CsvBucket
+
+  DeptsBucketName:
+    Value: !Ref RollCallDeptsBucket
+    Export:
+      Name: !Ref DeptsBucket
+
+  SESBucketName:
+    Value: !Ref RollCallSESBucket
+    Export:
+      Name: !Ref SesBucket
