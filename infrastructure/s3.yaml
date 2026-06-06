@@ -30,12 +30,48 @@ Resources:
           - Id: rollcall-auto-delete-30-days
             Status: Enabled
             ExpirationInDays: 30
+      BucketEncryption:
+        ServerSideEncryptionConfiguration:
+          - ServerSideEncryptionByDefault:
+              SSEAlgorithm: AES256
+      PublicAccessBlockConfiguration:
+        BlockPublicAcls: true
+        BlockPublicPolicy: true
+        IgnorePublicAcls: true
+        RestrictPublicBuckets: true
+
+  RollCallCSVBucketPolicy:
+    Type: AWS::S3::BucketPolicy
+    Properties:
+      Bucket: !Ref RollCallCSVBucket
+      PolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Sid: DenyNonTLS
+            Effect: Deny
+            Principal: '*'
+            Action: 's3:*'
+            Resource:
+              - !Sub arn:aws:s3:::${CsvBucket}
+              - !Sub arn:aws:s3:::${CsvBucket}/*
+            Condition:
+              Bool:
+                aws:SecureTransport: 'false'
 
   # Holds reference CSVs and output XLSX; S3 event on .xlsx triggers ses-emailer-function
   RollCallDeptsBucket:
     Type: AWS::S3::Bucket
     Properties:
       BucketName: !Ref DeptsBucket
+      BucketEncryption:
+        ServerSideEncryptionConfiguration:
+          - ServerSideEncryptionByDefault:
+              SSEAlgorithm: AES256
+      PublicAccessBlockConfiguration:
+        BlockPublicAcls: true
+        BlockPublicPolicy: true
+        IgnorePublicAcls: true
+        RestrictPublicBuckets: true
       NotificationConfiguration:
         LambdaConfigurations:
           - Id: doneProcessing
@@ -47,11 +83,56 @@ Resources:
                     Value: xlsx
             Function: !Sub arn:aws:lambda:${AWS::Region}:${AWS::AccountId}:function:ses-emailer-function${Env}
 
+  RollCallDeptsBucketPolicy:
+    Type: AWS::S3::BucketPolicy
+    Properties:
+      Bucket: !Ref RollCallDeptsBucket
+      PolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Sid: DenyNonTLS
+            Effect: Deny
+            Principal: '*'
+            Action: 's3:*'
+            Resource:
+              - !Sub arn:aws:s3:::${DeptsBucket}
+              - !Sub arn:aws:s3:::${DeptsBucket}/*
+            Condition:
+              Bool:
+                aws:SecureTransport: 'false'
+
   # Raw inbound email storage; SES delivers here, csvParser reads from here
   RollCallSESBucket:
     Type: AWS::S3::Bucket
     Properties:
       BucketName: !Ref SesBucket
+      BucketEncryption:
+        ServerSideEncryptionConfiguration:
+          - ServerSideEncryptionByDefault:
+              SSEAlgorithm: AES256
+      PublicAccessBlockConfiguration:
+        BlockPublicAcls: true
+        BlockPublicPolicy: true
+        IgnorePublicAcls: true
+        RestrictPublicBuckets: true
+
+  RollCallSESBucketPolicy:
+    Type: AWS::S3::BucketPolicy
+    Properties:
+      Bucket: !Ref RollCallSESBucket
+      PolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Sid: DenyNonTLS
+            Effect: Deny
+            Principal: '*'
+            Action: 's3:*'
+            Resource:
+              - !Sub arn:aws:s3:::${SesBucket}
+              - !Sub arn:aws:s3:::${SesBucket}/*
+            Condition:
+              Bool:
+                aws:SecureTransport: 'false'
 
 Outputs:
   CSVBucketName:
