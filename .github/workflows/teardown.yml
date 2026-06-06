@@ -75,9 +75,9 @@ jobs:
     env:
       AWS_REGION:       ${{ needs.load-config.outputs.aws-region }}
       ENV_SUFFIX:       -${{ inputs.env }}
-      CSV_BUCKET:       ${{ needs.load-config.outputs.csv-bucket }}
-      DEPTS_BUCKET:     ${{ needs.load-config.outputs.depts-bucket }}
-      SES_BUCKET:       ${{ needs.load-config.outputs.ses-bucket }}
+      CSV_BUCKET:       ${{ needs.load-config.outputs.csv-bucket }}-${{ inputs.env }}
+      DEPTS_BUCKET:     ${{ needs.load-config.outputs.depts-bucket }}-${{ inputs.env }}
+      SES_BUCKET:       ${{ needs.load-config.outputs.ses-bucket }}-${{ inputs.env }}
       STACK_IAM:        ${{ needs.load-config.outputs.stack-iam }}
       STACK_S3:         ${{ needs.load-config.outputs.stack-s3 }}
       STACK_SNS:        ${{ needs.load-config.outputs.stack-sns }}
@@ -148,6 +148,7 @@ jobs:
           aws cloudformation wait stack-delete-complete --stack-name $STACK_CSV_PARSER --region $AWS_REGION
 
       - name: Deactivate SES receipt rule set
+        if: inputs.env == 'prod'
         run: |
           aws ses set-active-receipt-rule-set --region $AWS_REGION || true
 
