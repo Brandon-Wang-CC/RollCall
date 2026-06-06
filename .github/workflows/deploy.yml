@@ -11,7 +11,10 @@ on:
           - eng
           - test
           - prod
-  push:
+  workflow_run:
+    workflows: ["Build"]
+    types:
+      - completed
     branches:
       - main
 
@@ -22,6 +25,7 @@ permissions:
 jobs:
   # ── Read both config files and expose values to the deploy job ───────────────
   load-config:
+    if: github.event_name == 'workflow_dispatch' || github.event.workflow_run.conclusion == 'success'
     runs-on: ubuntu-latest
     outputs:
       aws-region:        ${{ steps.read.outputs.aws-region }}
