@@ -10,7 +10,9 @@
 
 aws:
   region: us-east-1
-  # IAM role GitHub Actions assumes via OIDC — no long-lived credentials required
+  # IAM role GitHub Actions assumes via OIDC — no long-lived credentials required.
+  # Find it in the AWS Console under IAM → Roles → GitHubActionsDeploy, or run:
+  #   aws iam get-role --role-name GitHubActionsDeploy --query Role.Arn --output text
   oidcRoleArn: arn:aws:iam::844905860028:role/GitHubActionsDeploy
 
 # CloudFormation stack names — change these to avoid collisions if deploying
