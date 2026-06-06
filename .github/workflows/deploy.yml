@@ -11,9 +11,9 @@ on:
           - eng
           - test
           - prod
-  # push:
-  #   branches:
-  #     - master
+  push:
+    branches:
+      - main
 
 permissions:
   id-token: write
@@ -107,10 +107,10 @@ jobs:
 
     env:
       AWS_REGION:        ${{ needs.load-config.outputs.aws-region }}
-      ENV_SUFFIX:        -${{ inputs.env }}
-      CSV_BUCKET:        ${{ needs.load-config.outputs.csv-bucket }}-${{ inputs.env }}
-      DEPTS_BUCKET:      ${{ needs.load-config.outputs.depts-bucket }}-${{ inputs.env }}
-      SES_BUCKET:        ${{ needs.load-config.outputs.ses-bucket }}-${{ inputs.env }}
+      ENV_SUFFIX:        -${{ inputs.env || 'prod' }}
+      CSV_BUCKET:        ${{ needs.load-config.outputs.csv-bucket }}-${{ inputs.env || 'prod' }}
+      DEPTS_BUCKET:      ${{ needs.load-config.outputs.depts-bucket }}-${{ inputs.env || 'prod' }}
+      SES_BUCKET:        ${{ needs.load-config.outputs.ses-bucket }}-${{ inputs.env || 'prod' }}
       SENDER_DOMAIN:     ${{ needs.load-config.outputs.sender-domain }}
       SENDER_EMAIL:      ${{ needs.load-config.outputs.sender-email }}
       STACK_IAM:         ${{ needs.load-config.outputs.stack-iam }}
@@ -290,8 +290,14 @@ jobs:
 
       # ── Post-deploy ───────────────────────────────────────────────────────────
 
+      # NOTE: This step only runs for prod. For non-prod environments (eng, test),
+      # the rule set is deployed but NOT activated — SES only allows one active rule
+      # set at a time, so activating eng/test would take prod offline.
+      # To test a non-prod pipeline, manually activate its rule set:
+      #   aws ses set-active-receipt-rule-set --rule-set-name DeliverToS3-<env> --region <region>
+      # Remember to reactivate prod (DeliverToS3) when done.
       - name: Activate SES receipt rule set
-        if: inputs.env == 'prod'
+        if: inputs.env == 'prod' || github.event_name == 'push'
         run: |
           aws ses set-active-receipt-rule-set \
             --rule-set-name "DeliverToS3${ENV_SUFFIX}" \
