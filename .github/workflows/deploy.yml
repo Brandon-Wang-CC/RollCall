@@ -2,6 +2,15 @@ name: Deploy
 
 on:
   workflow_dispatch:
+    inputs:
+      env:
+        description: 'Target environment'
+        required: true
+        type: choice
+        options:
+          - eng
+          - test
+          - prod
   # push:
   #   branches:
   #     - master
@@ -94,6 +103,7 @@ jobs:
 
     env:
       AWS_REGION:        ${{ needs.load-config.outputs.aws-region }}
+      ENV_SUFFIX:        -${{ inputs.env }}
       CSV_BUCKET:        ${{ needs.load-config.outputs.csv-bucket }}
       DEPTS_BUCKET:      ${{ needs.load-config.outputs.depts-bucket }}
       SES_BUCKET:        ${{ needs.load-config.outputs.ses-bucket }}
@@ -137,7 +147,7 @@ jobs:
             --template-file infrastructure/iam.yaml \
             --stack-name $STACK_IAM \
             --capabilities CAPABILITY_NAMED_IAM \
-            --parameter-overrides CsvBucket=$CSV_BUCKET DeptsBucket=$DEPTS_BUCKET SesBucket=$SES_BUCKET \
+            --parameter-overrides CsvBucket=$CSV_BUCKET DeptsBucket=$DEPTS_BUCKET SesBucket=$SES_BUCKET SenderDomain=$SENDER_DOMAIN Env="$ENV_SUFFIX" \
             --no-fail-on-empty-changeset
 
       - name: Deploy S3 buckets
@@ -145,7 +155,7 @@ jobs:
           aws cloudformation deploy \
             --template-file infrastructure/s3.yaml \
             --stack-name $STACK_S3 \
-            --parameter-overrides CsvBucket=$CSV_BUCKET DeptsBucket=$DEPTS_BUCKET SesBucket=$SES_BUCKET \
+            --parameter-overrides CsvBucket=$CSV_BUCKET DeptsBucket=$DEPTS_BUCKET SesBucket=$SES_BUCKET Env="$ENV_SUFFIX" \
             --no-fail-on-empty-changeset
 
       - name: Upload reference data to S3
@@ -157,7 +167,7 @@ jobs:
           aws cloudformation deploy \
             --template-file infrastructure/sns.yaml \
             --stack-name $STACK_SNS \
-            --parameter-overrides AlarmEmail="$ALARM_EMAIL" \
+            --parameter-overrides AlarmEmail="$ALARM_EMAIL" Env="$ENV_SUFFIX" \
             --no-fail-on-empty-changeset
 
       - name: Deploy SQS queues
@@ -165,6 +175,7 @@ jobs:
           aws cloudformation deploy \
             --template-file infrastructure/sqs.yaml \
             --stack-name $STACK_SQS \
+            --parameter-overrides Env="$ENV_SUFFIX" \
             --no-fail-on-empty-changeset
 
       - name: Deploy SES receipt rules
@@ -172,7 +183,7 @@ jobs:
           aws cloudformation deploy \
             --template-file infrastructure/ses.yaml \
             --stack-name $STACK_SES \
-            --parameter-overrides SenderDomain=$SENDER_DOMAIN SesBucket=$SES_BUCKET \
+            --parameter-overrides SenderDomain=$SENDER_DOMAIN SesBucket=$SES_BUCKET Env="$ENV_SUFFIX" \
             --no-fail-on-empty-changeset
 
       # ── Lambda functions ──────────────────────────────────────────────────────
@@ -191,7 +202,7 @@ jobs:
             --region $AWS_REGION \
             --resolve-s3 \
             --capabilities CAPABILITY_NAMED_IAM \
-            --parameter-overrides CsvBucket=$CSV_BUCKET \
+            --parameter-overrides CsvBucket=$CSV_BUCKET Env="$ENV_SUFFIX" \
             --no-confirm-changeset \
             --no-fail-on-empty-changeset
 
@@ -211,6 +222,7 @@ jobs:
               FilePrefixContractorClosed="$FILE_PREFIX_CONTRACTOR_CLOSED" \
               FilePrefixCandidates="$FILE_PREFIX_CANDIDATES" \
               MD1Name="$MD1_NAME" \
+              Env="$ENV_SUFFIX" \
             --no-confirm-changeset \
             --no-fail-on-empty-changeset
 
@@ -222,7 +234,7 @@ jobs:
             --region $AWS_REGION \
             --resolve-s3 \
             --capabilities CAPABILITY_NAMED_IAM \
-            --parameter-overrides SenderEmail=$SENDER_EMAIL DeptsBucket=$DEPTS_BUCKET \
+            --parameter-overrides SenderEmail=$SENDER_EMAIL DeptsBucket=$DEPTS_BUCKET Env="$ENV_SUFFIX" \
             --no-confirm-changeset \
             --no-fail-on-empty-changeset
 
@@ -233,12 +245,14 @@ jobs:
           aws cloudformation deploy \
             --template-file infrastructure/cloudwatch.yaml \
             --stack-name $STACK_CLOUDWATCH \
+            --parameter-overrides Env="$ENV_SUFFIX" \
             --no-fail-on-empty-changeset
 
       # ── Post-deploy ───────────────────────────────────────────────────────────
 
       - name: Activate SES receipt rule set
+        if: inputs.env == 'prod'
         run: |
           aws ses set-active-receipt-rule-set \
-            --rule-set-name DeliverToS3 \
+            --rule-set-name "DeliverToS3${ENV_SUFFIX}" \
             --region $AWS_REGION

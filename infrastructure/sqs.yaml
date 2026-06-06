@@ -1,13 +1,19 @@
 AWSTemplateFormatVersion: '2010-09-09'
 Description: SQS queues for the RollCall ETL pipeline
 
+Parameters:
+  Env:
+    Type: String
+    Default: ""
+    Description: Suffix appended to all resource names (e.g. "-test") — set in deploy-config.yaml to deploy alongside production without name collisions
+
 Resources:
 
   # Dead-letter queue for rollcall-sqs (maxReceiveCount: 5)
   RollCallDLQ:
     Type: AWS::SQS::Queue
     Properties:
-      QueueName: rollcall-dlq-sqs
+      QueueName: !Sub "rollcall-dlq-sqs${Env}"
       VisibilityTimeout: 30
       MessageRetentionPeriod: 345600
       SqsManagedSseEnabled: true
@@ -16,8 +22,8 @@ Resources:
   RollCallQueue:
     Type: AWS::SQS::Queue
     Properties:
-      QueueName: rollcall-sqs
-      VisibilityTimeout: 60
+      QueueName: !Sub "rollcall-sqs${Env}"
+      VisibilityTimeout: 300
       MessageRetentionPeriod: 345600
       ReceiveMessageWaitTimeSeconds: 20
       RedrivePolicy:
@@ -41,7 +47,7 @@ Resources:
             Resource: !GetAtt RollCallQueue.Arn
             Condition:
               ArnEquals:
-                aws:SourceArn: !Sub arn:aws:sns:${AWS::Region}:${AWS::AccountId}:dataReceived
+                aws:SourceArn: !Sub arn:aws:sns:${AWS::Region}:${AWS::AccountId}:dataReceived${Env}
           - Sid: topic-subscription-dataReceived
             Effect: Allow
             Principal:
@@ -50,13 +56,13 @@ Resources:
             Resource: !GetAtt RollCallQueue.Arn
             Condition:
               ArnLike:
-                aws:SourceArn: !Sub arn:aws:sns:${AWS::Region}:${AWS::AccountId}:dataReceived
+                aws:SourceArn: !Sub arn:aws:sns:${AWS::Region}:${AWS::AccountId}:dataReceived${Env}
 
   # Receives from SNS emailReceived, triggers csvParser
   CSVParserQueue:
     Type: AWS::SQS::Queue
     Properties:
-      QueueName: CSV-Parser-queue
+      QueueName: !Sub "CSV-Parser-queue${Env}"
       VisibilityTimeout: 360
       MessageRetentionPeriod: 345600
       SqsManagedSseEnabled: true
@@ -83,20 +89,20 @@ Resources:
             Resource: !GetAtt CSVParserQueue.Arn
             Condition:
               ArnLike:
-                aws:SourceArn: !Sub arn:aws:sns:${AWS::Region}:${AWS::AccountId}:emailReceived
+                aws:SourceArn: !Sub arn:aws:sns:${AWS::Region}:${AWS::AccountId}:emailReceived${Env}
 
 Outputs:
   RollCallQueueArn:
     Value: !GetAtt RollCallQueue.Arn
     Export:
-      Name: rollcall-sqs-arn
+      Name: !Sub "rollcall-sqs-arn${Env}"
 
   RollCallDLQArn:
     Value: !GetAtt RollCallDLQ.Arn
     Export:
-      Name: rollcall-dlq-sqs-arn
+      Name: !Sub "rollcall-dlq-sqs-arn${Env}"
 
   CSVParserQueueArn:
     Value: !GetAtt CSVParserQueue.Arn
     Export:
-      Name: csv-parser-queue-arn
+      Name: !Sub "csv-parser-queue-arn${Env}"

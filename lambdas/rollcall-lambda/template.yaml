@@ -29,19 +29,23 @@ Parameters:
   MD1Name:
     Type: String
     Description: Name and employee ID stamped into the MD-1 column of every output row
+  Env:
+    Type: String
+    Default: ""
+    Description: Suffix appended to all resource names (e.g. "-test") — set in deploy-config.yaml to deploy alongside production without name collisions
 
 Resources:
 
   RollCallLambdaFunction:
     Type: AWS::Serverless::Function
     Properties:
-      FunctionName: rollcall-lambda
+      FunctionName: !Sub "rollcall-lambda${Env}"
       Handler: lambda_function.lambda_handler
       Runtime: python3.12
       CodeUri: ./
       MemorySize: 1024
       Timeout: 300
-      Role: !Sub arn:aws:iam::${AWS::AccountId}:role/service-role/rollcall-lambda-role
+      Role: !Sub arn:aws:iam::${AWS::AccountId}:role/service-role/rollcall-lambda-role${Env}
       Layers:
         - !Sub arn:aws:lambda:${AWS::Region}:336392948345:layer:AWSSDKPandas-Python312:24
       Environment:
@@ -61,14 +65,16 @@ Resources:
         SQSTrigger:
           Type: SQS
           Properties:
-            Queue: !Sub arn:aws:sqs:${AWS::Region}:${AWS::AccountId}:rollcall-sqs
-            BatchSize: 10
+            Queue: !Sub arn:aws:sqs:${AWS::Region}:${AWS::AccountId}:rollcall-sqs${Env}
+            BatchSize: 1
+            FunctionResponseTypes:
+              - ReportBatchItemFailures
       LoggingConfig:
         LogFormat: Text
-        LogGroup: /aws/lambda/rollcall-lambda
+        LogGroup: !Sub /aws/lambda/rollcall-lambda${Env}
 
 Outputs:
   RollCallLambdaArn:
     Value: !GetAtt RollCallLambdaFunction.Arn
     Export:
-      Name: rollcall-lambda-arn
+      Name: !Sub "rollcall-lambda-arn${Env}"

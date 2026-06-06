@@ -11,6 +11,13 @@ Parameters:
   SesBucket:
     Type: String
     Description: S3 bucket where SES delivers raw inbound emails
+  SenderDomain:
+    Type: String
+    Description: Verified SES domain identity — scopes SES send permissions to this domain only
+  Env:
+    Type: String
+    Default: ""
+    Description: Suffix appended to all resource names (e.g. "-test") — set in deploy-config.yaml to deploy alongside production without name collisions
 
 Resources:
 
@@ -19,7 +26,7 @@ Resources:
   CSVParserRole:
     Type: AWS::IAM::Role
     Properties:
-      RoleName: csvParser-role
+      RoleName: !Sub "csvParser-role${Env}"
       Path: /service-role/
       AssumeRolePolicyDocument:
         Version: '2012-10-17'
@@ -35,24 +42,25 @@ Resources:
           PolicyDocument:
             Version: '2012-10-17'
             Statement:
-              - Sid: VisualEditor0
+              - Sid: CsvBucketAccess
                 Effect: Allow
                 Action:
                   - s3:PutObject
                   - s3:GetObject
-                Resource:
-                  - !Sub arn:aws:s3:::${SesBucket}/*
-                  - !Sub arn:aws:s3:::${CsvBucket}/*
-              - Effect: Allow
+                  - s3:DeleteObject
+                Resource: !Sub arn:aws:s3:::${CsvBucket}/*
+              - Sid: CsvBucketList
+                Effect: Allow
                 Action: s3:ListBucket
                 Resource: !Sub arn:aws:s3:::${CsvBucket}
-              - Effect: Allow
-                Action: s3:DeleteObject
-                Resource: !Sub arn:aws:s3:::${CsvBucket}/*
+              - Sid: ReadRawEmail
+                Effect: Allow
+                Action: s3:GetObject
+                Resource: !Sub arn:aws:s3:::${SesBucket}/RAW_EMAIL/*
               - Sid: VisualEditor1
                 Effect: Allow
                 Action: sns:Publish
-                Resource: !Sub arn:aws:sns:${AWS::Region}:${AWS::AccountId}:dataReceived
+                Resource: !Sub arn:aws:sns:${AWS::Region}:${AWS::AccountId}:dataReceived${Env}
         - PolicyName: SQS
           PolicyDocument:
             Version: '2012-10-17'
@@ -63,14 +71,14 @@ Resources:
                   - sqs:DeleteMessage
                   - sqs:ReceiveMessage
                   - sqs:GetQueueAttributes
-                Resource: !Sub arn:aws:sqs:${AWS::Region}:${AWS::AccountId}:CSV-Parser-queue
+                Resource: !Sub arn:aws:sqs:${AWS::Region}:${AWS::AccountId}:CSV-Parser-queue${Env}
 
   # ─── rollcall-lambda ─────────────────────────────────────────────────────────
 
   RollCallLambdaRole:
     Type: AWS::IAM::Role
     Properties:
-      RoleName: rollcall-lambda-role
+      RoleName: !Sub "rollcall-lambda-role${Env}"
       Path: /service-role/
       AssumeRolePolicyDocument:
         Version: '2012-10-17'
@@ -106,21 +114,21 @@ Resources:
                 Action:
                   - ses:SendEmail
                   - ses:SendRawEmail
-                Resource: '*'
+                Resource: !Sub arn:aws:ses:${AWS::Region}:${AWS::AccountId}:identity/${SenderDomain}
         - PolicyName: Lambda-invoke-ses-emailer-function
           PolicyDocument:
             Version: '2012-10-17'
             Statement:
               - Effect: Allow
                 Action: lambda:InvokeFunction
-                Resource: !Sub arn:aws:lambda:${AWS::Region}:${AWS::AccountId}:function:ses-emailer-function
+                Resource: !Sub arn:aws:lambda:${AWS::Region}:${AWS::AccountId}:function:ses-emailer-function${Env}
 
   # ─── ses-emailer-function ────────────────────────────────────────────────────
 
   SESEmailerRole:
     Type: AWS::IAM::Role
     Properties:
-      RoleName: ses-emailer-function-role
+      RoleName: !Sub "ses-emailer-function-role${Env}"
       Path: /service-role/
       AssumeRolePolicyDocument:
         Version: '2012-10-17'
@@ -144,13 +152,13 @@ Resources:
                 Resource: !Sub arn:aws:s3:::${DeptsBucket}/*
               - Effect: Allow
                 Action: lambda:InvokeFunction
-                Resource: !Sub arn:aws:lambda:${AWS::Region}:${AWS::AccountId}:function:ses-emailer-function
+                Resource: !Sub arn:aws:lambda:${AWS::Region}:${AWS::AccountId}:function:ses-emailer-function${Env}
                 Condition:
                   ArnLike:
                     AWS:SourceArn: !Sub arn:aws:s3:::${DeptsBucket}
               - Effect: Allow
                 Action: ses:SendRawEmail
-                Resource: '*'
+                Resource: !Sub arn:aws:ses:${AWS::Region}:${AWS::AccountId}:identity/${SenderDomain}
 
   # ─── SES → S3 write role ─────────────────────────────────────────────────────
 
@@ -158,7 +166,7 @@ Resources:
   SESWriteToS3Role:
     Type: AWS::IAM::Role
     Properties:
-      RoleName: SESWriteToS3
+      RoleName: !Sub "SESWriteToS3${Env}"
       AssumeRolePolicyDocument:
         Version: '2012-10-17'
         Statement:
@@ -182,19 +190,19 @@ Outputs:
   CSVParserRoleArn:
     Value: !GetAtt CSVParserRole.Arn
     Export:
-      Name: csvParser-role-arn
+      Name: !Sub "csvParser-role-arn${Env}"
 
   RollCallLambdaRoleArn:
     Value: !GetAtt RollCallLambdaRole.Arn
     Export:
-      Name: rollcall-lambda-role-arn
+      Name: !Sub "rollcall-lambda-role-arn${Env}"
 
   SESEmailerRoleArn:
     Value: !GetAtt SESEmailerRole.Arn
     Export:
-      Name: ses-emailer-role-arn
+      Name: !Sub "ses-emailer-role-arn${Env}"
 
   SESWriteToS3RoleArn:
     Value: !GetAtt SESWriteToS3Role.Arn
     Export:
-      Name: ses-write-to-s3-role-arn
+      Name: !Sub "ses-write-to-s3-role-arn${Env}"
