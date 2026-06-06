@@ -159,7 +159,7 @@ jobs:
           aws cloudformation deploy \
             --template-file infrastructure/s3.yaml \
             --stack-name $STACK_S3 \
-            --parameter-overrides CsvBucket=$CSV_BUCKET DeptsBucket=$DEPTS_BUCKET SesBucket=$SES_BUCKET Env="$ENV_SUFFIX" \
+            --parameter-overrides CsvBucket=$CSV_BUCKET DeptsBucket=$DEPTS_BUCKET SesBucket=$SES_BUCKET \
             --no-fail-on-empty-changeset
 
       - name: Upload reference data to S3
