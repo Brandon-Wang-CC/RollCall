@@ -147,11 +147,11 @@ jobs:
         with:
           use-installer: true
 
-      # ── Pre-flight: clear any stacks stuck in ROLLBACK_COMPLETE ──────────────
-      # cloudformation deploy creates a changeset, which fails on ROLLBACK_COMPLETE.
-      # Deleting first lets the next step recreate from scratch.
+      # ── Pre-flight: resolve stacks in undeployable states ────────────────────
+      # ROLLBACK_COMPLETE: changeset creation fails — delete so next step recreates.
+      # UPDATE_COMPLETE_CLEANUP_IN_PROGRESS: transient post-update cleanup — wait it out.
 
-      - name: Delete stacks stuck in ROLLBACK_COMPLETE
+      - name: Resolve stacks in undeployable states
         run: |
           for stack in $STACK_IAM $STACK_S3 $STACK_SNS $STACK_SQS $STACK_SES $STACK_CLOUDWATCH $STACK_CSV_PARSER $STACK_ROLLCALL $STACK_SES_EMAILER; do
             status=$(aws cloudformation describe-stacks --stack-name "$stack" --region $AWS_REGION \
@@ -160,6 +160,9 @@ jobs:
               echo "Deleting $stack (ROLLBACK_COMPLETE)..."
               aws cloudformation delete-stack --stack-name "$stack" --region $AWS_REGION
               aws cloudformation wait stack-delete-complete --stack-name "$stack" --region $AWS_REGION
+            elif [ "$status" = "UPDATE_COMPLETE_CLEANUP_IN_PROGRESS" ]; then
+              echo "Waiting for $stack to finish cleanup..."
+              aws cloudformation wait stack-update-complete --stack-name "$stack" --region $AWS_REGION
             fi
           done
 
