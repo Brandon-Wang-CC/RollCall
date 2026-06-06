@@ -8,6 +8,8 @@ import zipfile
 import xml.etree.ElementTree as ET
 import csv
 import openpyxl
+import random
+import time
 from openpyxl.utils import column_index_from_string
 from datetime import datetime
 
@@ -206,18 +208,24 @@ def publish_to_sns(object_key: str):
 # =========================
 # File Processor
 # =========================
-SHEET_CONFIG = {
-    "ES&F_GR&S Unfilled Requisition Report": [("Sheet1", None)],
-    "GR&S Candidate Flow Weekly Report":      [("Sheet1", None)],
-    "NEW-IT Contractor-VG-Vendor Req Report": [("Open", "Open"), ("Closed", "Closed")],
-}
-
-    
+def _get_object_with_retry(bucket, key, max_retries=3):
+    for attempt in range(max_retries):
+        try:
+            return s3.get_object(Bucket=bucket, Key=key)
+        except s3.exceptions.NoSuchKey:
+            raise
+        except Exception as e:
+            if attempt < max_retries - 1:
+                wait = (2 ** attempt) + random.uniform(0, 1)
+                logger.warning("S3 get_object retry %d/%d in %.1fs: %s", attempt + 1, max_retries - 1, wait, e)
+                time.sleep(wait)
+            else:
+                raise
 
 
 def wipe_buckets():
     s3_resource = boto3.resource("s3")
-    bucket = s3_resource.Bucket("rollcall-s3-csv")
+    bucket = s3_resource.Bucket(CSV_BUCKET)
     bucket.objects.all().delete()
 
 
@@ -245,7 +253,7 @@ def lambda_handler(event, context):
 
         logger.info("Processing email: %s/%s", bucket_name, object_key)
 
-        email_obj = s3.get_object(Bucket=bucket_name, Key=object_key)
+        email_obj = _get_object_with_retry(bucket_name, object_key)
         msg = email.message_from_binary_file(email_obj["Body"])
 
         for part in msg.walk():

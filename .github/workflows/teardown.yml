@@ -1,0 +1,177 @@
+name: Teardown
+
+on:
+  workflow_dispatch:
+    inputs:
+      env:
+        description: 'Target environment to tear down'
+        required: true
+        type: choice
+        options:
+          - eng
+          - test
+          - prod
+
+jobs:
+  # ── Read config files (identical to deploy workflow) ─────────────────────────
+  load-config:
+    runs-on: ubuntu-latest
+    outputs:
+      aws-region:        ${{ steps.read.outputs.aws-region }}
+      oidc-role-arn:     ${{ steps.read.outputs.oidc-role-arn }}
+      stack-iam:         ${{ steps.read.outputs.stack-iam }}
+      stack-s3:          ${{ steps.read.outputs.stack-s3 }}
+      stack-sns:         ${{ steps.read.outputs.stack-sns }}
+      stack-sqs:         ${{ steps.read.outputs.stack-sqs }}
+      stack-ses:         ${{ steps.read.outputs.stack-ses }}
+      stack-cloudwatch:  ${{ steps.read.outputs.stack-cloudwatch }}
+      stack-csv-parser:  ${{ steps.read.outputs.stack-csv-parser }}
+      stack-rollcall:    ${{ steps.read.outputs.stack-rollcall }}
+      stack-ses-emailer: ${{ steps.read.outputs.stack-ses-emailer }}
+      csv-bucket:        ${{ steps.read.outputs.csv-bucket }}
+      depts-bucket:      ${{ steps.read.outputs.depts-bucket }}
+      ses-bucket:        ${{ steps.read.outputs.ses-bucket }}
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - id: read
+        name: Parse deploy-config.yaml and user-settings.yaml
+        run: |
+          python3 << 'EOF'
+          import yaml, os
+
+          config   = yaml.safe_load(open('.github/deploy-config.yaml'))
+          settings = yaml.safe_load(open('user-settings.yaml'))
+
+          outputs = {
+            'aws-region':        config['aws']['region'],
+            'oidc-role-arn':     config['aws']['oidcRoleArn'],
+            'stack-iam':         config['stacks']['iam'],
+            'stack-s3':          config['stacks']['s3'],
+            'stack-sns':         config['stacks']['sns'],
+            'stack-sqs':         config['stacks']['sqs'],
+            'stack-ses':         config['stacks']['ses'],
+            'stack-cloudwatch':  config['stacks']['cloudwatch'],
+            'stack-csv-parser':  config['stacks']['csvParser'],
+            'stack-rollcall':    config['stacks']['rollcallLambda'],
+            'stack-ses-emailer': config['stacks']['sesEmailer'],
+            'csv-bucket':        settings['CsvBucket'],
+            'depts-bucket':      settings['DeptsBucket'],
+            'ses-bucket':        settings['SesBucket'],
+          }
+
+          with open(os.environ['GITHUB_OUTPUT'], 'a') as f:
+            for k, v in outputs.items():
+              f.write(f'{k}={v}\n')
+          EOF
+
+  # ── Delete all stacks in reverse dependency order ─────────────────────────────
+  teardown:
+    needs: load-config
+    runs-on: ubuntu-latest
+    environment: production
+
+    env:
+      AWS_REGION:       ${{ needs.load-config.outputs.aws-region }}
+      ENV_SUFFIX:       -${{ inputs.env }}
+      CSV_BUCKET:       ${{ needs.load-config.outputs.csv-bucket }}
+      DEPTS_BUCKET:     ${{ needs.load-config.outputs.depts-bucket }}
+      SES_BUCKET:       ${{ needs.load-config.outputs.ses-bucket }}
+      STACK_IAM:        ${{ needs.load-config.outputs.stack-iam }}
+      STACK_S3:         ${{ needs.load-config.outputs.stack-s3 }}
+      STACK_SNS:        ${{ needs.load-config.outputs.stack-sns }}
+      STACK_SQS:        ${{ needs.load-config.outputs.stack-sqs }}
+      STACK_SES:        ${{ needs.load-config.outputs.stack-ses }}
+      STACK_CLOUDWATCH: ${{ needs.load-config.outputs.stack-cloudwatch }}
+      STACK_CSV_PARSER: ${{ needs.load-config.outputs.stack-csv-parser }}
+      STACK_ROLLCALL:   ${{ needs.load-config.outputs.stack-rollcall }}
+      STACK_SES_EMAILER: ${{ needs.load-config.outputs.stack-ses-emailer }}
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ needs.load-config.outputs.oidc-role-arn }}
+          aws-region:     ${{ needs.load-config.outputs.aws-region }}
+
+      # ── Empty S3 buckets (CloudFormation cannot delete non-empty buckets) ─────
+
+      - name: Empty S3 buckets
+        run: |
+          python3 << 'EOF'
+          import boto3, os
+
+          s3 = boto3.client('s3', region_name=os.environ['AWS_REGION'])
+          buckets = [os.environ['CSV_BUCKET'], os.environ['DEPTS_BUCKET'], os.environ['SES_BUCKET']]
+
+          for bucket in buckets:
+              print(f'Emptying {bucket}...')
+              try:
+                  paginator = s3.get_paginator('list_object_versions')
+                  for page in paginator.paginate(Bucket=bucket):
+                      objects = [
+                          {'Key': v['Key'], 'VersionId': v['VersionId']}
+                          for v in page.get('Versions', []) + page.get('DeleteMarkers', [])
+                      ]
+                      if objects:
+                          s3.delete_objects(Bucket=bucket, Delete={'Objects': objects})
+                  print(f'  done.')
+              except s3.exceptions.NoSuchBucket:
+                  print(f'  does not exist, skipping.')
+              except Exception as e:
+                  print(f'  warning: {e}')
+          EOF
+
+      # ── Delete stacks — reverse of deploy order, each waits for completion ────
+
+      - name: Delete CloudWatch alarms
+        run: |
+          aws cloudformation delete-stack --stack-name $STACK_CLOUDWATCH --region $AWS_REGION
+          aws cloudformation wait stack-delete-complete --stack-name $STACK_CLOUDWATCH --region $AWS_REGION
+
+      - name: Delete ses-emailer
+        run: |
+          aws cloudformation delete-stack --stack-name $STACK_SES_EMAILER --region $AWS_REGION
+          aws cloudformation wait stack-delete-complete --stack-name $STACK_SES_EMAILER --region $AWS_REGION
+
+      - name: Delete rollcall-lambda
+        run: |
+          aws cloudformation delete-stack --stack-name $STACK_ROLLCALL --region $AWS_REGION
+          aws cloudformation wait stack-delete-complete --stack-name $STACK_ROLLCALL --region $AWS_REGION
+
+      - name: Delete csvParser
+        run: |
+          aws cloudformation delete-stack --stack-name $STACK_CSV_PARSER --region $AWS_REGION
+          aws cloudformation wait stack-delete-complete --stack-name $STACK_CSV_PARSER --region $AWS_REGION
+
+      - name: Deactivate SES receipt rule set
+        run: |
+          aws ses set-active-receipt-rule-set --region $AWS_REGION || true
+
+      - name: Delete SES rules
+        run: |
+          aws cloudformation delete-stack --stack-name $STACK_SES --region $AWS_REGION
+          aws cloudformation wait stack-delete-complete --stack-name $STACK_SES --region $AWS_REGION
+
+      - name: Delete SQS queues
+        run: |
+          aws cloudformation delete-stack --stack-name $STACK_SQS --region $AWS_REGION
+          aws cloudformation wait stack-delete-complete --stack-name $STACK_SQS --region $AWS_REGION
+
+      - name: Delete SNS topics
+        run: |
+          aws cloudformation delete-stack --stack-name $STACK_SNS --region $AWS_REGION
+          aws cloudformation wait stack-delete-complete --stack-name $STACK_SNS --region $AWS_REGION
+
+      - name: Delete S3 buckets
+        run: |
+          aws cloudformation delete-stack --stack-name $STACK_S3 --region $AWS_REGION
+          aws cloudformation wait stack-delete-complete --stack-name $STACK_S3 --region $AWS_REGION
+
+      - name: Delete IAM roles
+        run: |
+          aws cloudformation delete-stack --stack-name $STACK_IAM --region $AWS_REGION
+          aws cloudformation wait stack-delete-complete --stack-name $STACK_IAM --region $AWS_REGION
