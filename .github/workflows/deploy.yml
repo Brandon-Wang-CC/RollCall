@@ -18,6 +18,10 @@ on:
     branches:
       - main
 
+concurrency:
+  group: deploy-${{ inputs.env || 'prod' }}
+  cancel-in-progress: false
+
 permissions:
   id-token: write
   contents: read
