@@ -12,6 +12,10 @@ aws:
   region: FILL_AWS_REGION_HERE
   # IAM role GitHub Actions assumes via OIDC — no long-lived credentials required
   oidcRoleArn: arn:aws:iam::FILL_ACCOUNT_ID_HERE:role/FILL_GITHUB_ACTIONS_ROLE_HERE
+  # Suffix appended to every AWS resource name and CloudFormation export.
+  # Leave empty ("") for production. Set to e.g. "-test" to deploy a full isolated
+  # copy of the stack alongside production without any name collisions.
+  env: ""
 
 # CloudFormation stack names — change these to avoid collisions if deploying
 # multiple environments into the same account.
