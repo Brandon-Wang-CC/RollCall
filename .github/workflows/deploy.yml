@@ -203,7 +203,7 @@ jobs:
           aws cloudformation deploy \
             --template-file infrastructure/ses.yaml \
             --stack-name $STACK_SES \
-            --parameter-overrides SenderDomain=$SENDER_DOMAIN SesBucket=$SES_BUCKET Env="$ENV_SUFFIX" \
+            --parameter-overrides SesBucket=$SES_BUCKET Env="$ENV_SUFFIX" \
             --no-fail-on-empty-changeset
 
       # ── Lambda functions ──────────────────────────────────────────────────────
