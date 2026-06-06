@@ -1,5 +1,12 @@
 name: Snapshot
 
+# Captures the configuration of all live RollCall AWS resources as a
+# 90-day artifact. Run this before any test deploy to create a restore point.
+#
+# The existing RollCall infrastructure was deployed manually (not via
+# CloudFormation), so this workflow describes the raw resource configs
+# rather than CloudFormation stack templates.
+
 on:
   workflow_dispatch:
 
@@ -11,17 +18,8 @@ jobs:
   load-config:
     runs-on: ubuntu-latest
     outputs:
-      aws-region:        ${{ steps.read.outputs.aws-region }}
-      oidc-role-arn:     ${{ steps.read.outputs.oidc-role-arn }}
-      stack-iam:         ${{ steps.read.outputs.stack-iam }}
-      stack-s3:          ${{ steps.read.outputs.stack-s3 }}
-      stack-sns:         ${{ steps.read.outputs.stack-sns }}
-      stack-sqs:         ${{ steps.read.outputs.stack-sqs }}
-      stack-ses:         ${{ steps.read.outputs.stack-ses }}
-      stack-cloudwatch:  ${{ steps.read.outputs.stack-cloudwatch }}
-      stack-csv-parser:  ${{ steps.read.outputs.stack-csv-parser }}
-      stack-rollcall:    ${{ steps.read.outputs.stack-rollcall }}
-      stack-ses-emailer: ${{ steps.read.outputs.stack-ses-emailer }}
+      aws-region:    ${{ steps.read.outputs.aws-region }}
+      oidc-role-arn: ${{ steps.read.outputs.oidc-role-arn }}
 
     steps:
       - uses: actions/checkout@v4
@@ -35,17 +33,8 @@ jobs:
           config = yaml.safe_load(open('.github/deploy-config.yaml'))
 
           outputs = {
-            'aws-region':        config['aws']['region'],
-            'oidc-role-arn':     config['aws']['oidcRoleArn'],
-            'stack-iam':         config['stacks']['iam'],
-            'stack-s3':          config['stacks']['s3'],
-            'stack-sns':         config['stacks']['sns'],
-            'stack-sqs':         config['stacks']['sqs'],
-            'stack-ses':         config['stacks']['ses'],
-            'stack-cloudwatch':  config['stacks']['cloudwatch'],
-            'stack-csv-parser':  config['stacks']['csvParser'],
-            'stack-rollcall':    config['stacks']['rollcallLambda'],
-            'stack-ses-emailer': config['stacks']['sesEmailer'],
+            'aws-region':    config['aws']['region'],
+            'oidc-role-arn': config['aws']['oidcRoleArn'],
           }
 
           with open(os.environ['GITHUB_OUTPUT'], 'a') as f:
@@ -58,16 +47,7 @@ jobs:
     runs-on: ubuntu-latest
 
     env:
-      AWS_REGION:        ${{ needs.load-config.outputs.aws-region }}
-      STACK_IAM:         ${{ needs.load-config.outputs.stack-iam }}
-      STACK_S3:          ${{ needs.load-config.outputs.stack-s3 }}
-      STACK_SNS:         ${{ needs.load-config.outputs.stack-sns }}
-      STACK_SQS:         ${{ needs.load-config.outputs.stack-sqs }}
-      STACK_SES:         ${{ needs.load-config.outputs.stack-ses }}
-      STACK_CLOUDWATCH:  ${{ needs.load-config.outputs.stack-cloudwatch }}
-      STACK_CSV_PARSER:  ${{ needs.load-config.outputs.stack-csv-parser }}
-      STACK_ROLLCALL:    ${{ needs.load-config.outputs.stack-rollcall }}
-      STACK_SES_EMAILER: ${{ needs.load-config.outputs.stack-ses-emailer }}
+      AWS_REGION: ${{ needs.load-config.outputs.aws-region }}
 
     steps:
       - uses: actions/checkout@v4
@@ -78,39 +58,65 @@ jobs:
           role-to-assume: ${{ needs.load-config.outputs.oidc-role-arn }}
           aws-region:     ${{ needs.load-config.outputs.aws-region }}
 
-      - name: Snapshot CloudFormation stacks
+      - name: Snapshot Lambda functions
         run: |
-          mkdir -p snapshot
+          mkdir -p snapshot/lambda snapshot/sqs snapshot/sns snapshot/ses
           TIMESTAMP=$(date -u +%Y%m%dT%H%M%SZ)
           echo "SNAPSHOT_TIMESTAMP=$TIMESTAMP" >> $GITHUB_ENV
 
-          for STACK in $STACK_IAM $STACK_S3 $STACK_SNS $STACK_SQS $STACK_SES $STACK_CLOUDWATCH $STACK_CSV_PARSER $STACK_ROLLCALL $STACK_SES_EMAILER; do
-            echo "Snapshotting $STACK..."
+          for FN in rollcall-lambda csvParser ses-emailer-function; do
+            echo "Lambda: $FN"
+            aws lambda get-function-configuration \
+              --function-name "$FN" --region "$AWS_REGION" \
+              > "snapshot/lambda/${FN}.json" 2>/dev/null \
+              || echo "  $FN not found, skipping."
+          done
 
-            aws cloudformation get-template \
-              --stack-name "$STACK" \
+      - name: Snapshot SQS queues
+        run: |
+          for QUEUE in CSV-Parser-queue rollcall-sqs rollcall-dlq-sqs; do
+            echo "SQS: $QUEUE"
+            URL=$(aws sqs get-queue-url --queue-name "$QUEUE" --region "$AWS_REGION" \
+                  --query QueueUrl --output text 2>/dev/null) || { echo "  $QUEUE not found, skipping."; continue; }
+            aws sqs get-queue-attributes \
+              --queue-url "$URL" \
+              --attribute-names All \
               --region "$AWS_REGION" \
-              --query TemplateBody \
-              --output text \
-              > "snapshot/${STACK}-template.yaml" 2>/dev/null \
-              || echo "  $STACK not found, skipping."
+              > "snapshot/sqs/${QUEUE}.json"
+          done
 
-            aws cloudformation describe-stacks \
-              --stack-name "$STACK" \
+      - name: Snapshot SNS topics
+        run: |
+          for TOPIC in dataReceived emailReceived Lambda1_Error_Notif Lambda2_Error_Notif; do
+            echo "SNS: $TOPIC"
+            ARN="arn:aws:sns:${AWS_REGION}:$(aws sts get-caller-identity --query Account --output text):${TOPIC}"
+            aws sns get-topic-attributes \
+              --topic-arn "$ARN" \
               --region "$AWS_REGION" \
-              > "snapshot/${STACK}-metadata.json" 2>/dev/null \
-              || true
+              > "snapshot/sns/${TOPIC}.json" 2>/dev/null \
+              || echo "  $TOPIC not found, skipping."
+            aws sns list-subscriptions-by-topic \
+              --topic-arn "$ARN" \
+              --region "$AWS_REGION" \
+              > "snapshot/sns/${TOPIC}-subscriptions.json" 2>/dev/null || true
           done
 
       - name: Snapshot SES rule sets
         run: |
-          aws ses get-active-receipt-rule-set \
-            --region "$AWS_REGION" \
-            > snapshot/ses-active-rule-set.json 2>/dev/null || true
+          aws ses list-receipt-rule-sets --region "$AWS_REGION" \
+            > snapshot/ses/rule-sets-list.json
 
-          aws ses list-receipt-rule-sets \
-            --region "$AWS_REGION" \
-            > snapshot/ses-rule-sets-list.json 2>/dev/null || true
+          aws ses get-active-receipt-rule-set --region "$AWS_REGION" \
+            > snapshot/ses/active-rule-set.json 2>/dev/null || true
+
+          for RULESET in DeliverToS3 test; do
+            echo "SES rule set: $RULESET"
+            aws ses describe-receipt-rule-set \
+              --rule-set-name "$RULESET" \
+              --region "$AWS_REGION" \
+              > "snapshot/ses/rule-set-${RULESET}.json" 2>/dev/null \
+              || echo "  $RULESET not found, skipping."
+          done
 
       - name: Upload snapshot
         uses: actions/upload-artifact@v4
