@@ -1,0 +1,42 @@
+# RollCall Pipeline — User Settings
+# Edit these values before deploying to a new environment.
+# Parameter names here match the CloudFormation parameters in each lambda template.
+
+# ─── Storage ──────────────────────────────────────────────────────────────────
+
+# S3 bucket that receives and stores processed XLSX attachments from inbound emails.
+# csvParser writes here; rollcall-lambda reads from here.
+CsvBucket: rollcall-s3-csv
+
+# S3 bucket for reference lookup files (cc_id.csv, depts.csv, status.csv, ESF WF data file ref.xlsx)
+# and where the completed output workbook is written for each run.
+DeptsBucket: rollcall-s3-depts-reference
+
+# S3 bucket where SES delivers raw inbound emails; csvParser reads from here.
+SesBucket: rollcall-s3-ses
+
+# ─── Business Logic ───────────────────────────────────────────────────────────
+
+# Name and employee ID stamped into the MD-1 column of every output row.
+MD1Name: "Manish Nagar (019067)"
+
+# ─── Report File Prefixes ─────────────────────────────────────────────────────
+# The beginning of each expected attachment filename as it arrives in the CSV bucket.
+# Update these if the names of the incoming report files change.
+FilePrefixUnfilled: "ES&F_GR&S Unfilled Requisition Report"
+FilePrefixContractorOpen: "NEW-IT Contractor-VG-Vendor Req Report-Open"
+FilePrefixContractorClosed: "NEW-IT Contractor-VG-Vendor Req Report-Closed"
+FilePrefixCandidates: "GR&S Candidate Flow Weekly Report"
+
+# ─── Email ────────────────────────────────────────────────────────────────────
+
+# Subdomain that receives inbound trigger emails and sends outbound result emails.
+# Must be a subdomain of your organization's primary domain — do NOT use the root domain,
+# as the MX record required for SES email receiving would redirect all employee email to AWS.
+# Example: pipeline.yourdomain.com
+SenderDomain: "vg-rollcall.com"
+
+# The "From" address used when emailing the output workbook back to the requester.
+# Must be an address within SenderDomain.
+# Example: rollcall@pipeline.yourdomain.com
+SenderEmail: "headcount-bot@vg-rollcall.com"

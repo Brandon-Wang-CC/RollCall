@@ -16,22 +16,24 @@ logger.setLevel(logging.INFO)
 # =========================
 # AWS Clients
 # =========================
-s3 = boto3.client("s3", region_name="us-east-1")
+s3 = boto3.client("s3")
 
 # =========================
 # Constants
 # =========================
-BUCKET_NAME = "rollcall-s3-csv"
-DEPTS_BUCKET = "rollcall-s3-dev-depts-reference"
+BUCKET_NAME  = os.environ.get("CSV_BUCKET")
+DEPTS_BUCKET = os.environ.get("DEPTS_BUCKET")
 TMP_DIR = "/tmp" if os.environ.get("AWS_EXECUTION_ENV") else os.path.join(os.path.dirname(os.path.abspath(__file__)), "tmp")
 
 
 FILE_PREFIXES = {
-    "unfilled":          "ES&F_GR&S Unfilled Requisition Report",
-    "contractor_open":   "NEW-IT Contractor-VG-Vendor Req Report-Open",
-    "contractor_closed": "NEW-IT Contractor-VG-Vendor Req Report-Closed",
-    "candidates":        "GR&S Candidate Flow Weekly Report",
+    "unfilled":          os.environ.get("FILE_PREFIX_UNFILLED"),
+    "contractor_open":   os.environ.get("FILE_PREFIX_CONTRACTOR_OPEN"),
+    "contractor_closed": os.environ.get("FILE_PREFIX_CONTRACTOR_CLOSED"),
+    "candidates":        os.environ.get("FILE_PREFIX_CANDIDATES"),
 }
+
+MD1_NAME = os.environ.get("MD1_NAME", "")
 
 FILTER_CONFIG = {
     "unfilled": {
@@ -168,8 +170,8 @@ def filter_candidates(local_path, dept_codes):
 # Reference Data
 # =========================
 ESF_WF_FILE = "ESF WF data file ref.xlsx"
-CC_ID_FILE = "cc_id.csv"
-DEPTS_FILE = "depts.csv"
+CC_ID_FILE  = "cc_id.csv"
+DEPTS_FILE  = "depts.csv"
 STATUS_FILE = "status.csv"
 
 def load_reference_data(bucket_name):
@@ -281,7 +283,7 @@ def build_crew_unfilled(filtered, ref):
             "Grade level":                                 grade_level,
             "Management Type":                             management_type,
             "Manager Name":                                row.get("Hiring Manager Name", ""),
-            "MD-1":                                        "Manish Nagar (019067)",
+            "MD-1":                                        MD1_NAME,
             "MD-2":                                        md2,
             "Status":                                      row.get("Job Requisition Status", ""),
             "Req #":                                       req_num_int,
@@ -407,7 +409,7 @@ def build_crew_filled(filtered, ref):
             "Grade level":                                 grade_level,
             "Management Type":                             management_type,
             "Manager Name":                                row.get("Hiring Manager", ""),
-            "MD-1":                                        "Manish Nagar (019067)",
+            "MD-1":                                        MD1_NAME,
             "MD-2":                                        md2,
             "Status":                                      short_status,
             "Req #":                                       req_num_int,
@@ -860,50 +862,3 @@ def lambda_handler(event, context):
             "key": OUTPUT_KEY
         })
     }
-
-# =========================
-# Main / Test
-# =========================
-if __name__ == "__main__":
-    discovered  = discover_files(BUCKET_NAME)
-    local_files = download_all_files(BUCKET_NAME, discovered)
-    filtered    = filter_all_files(local_files)
-
-    dept_codes = load_dept_codes(DEPTS_BUCKET, CC_ID_FILE)
-    filtered["candidates"] = filter_candidates(local_files["candidates"], dept_codes)
-
-    ref = load_reference_data(DEPTS_BUCKET)
-
-    crew_unfilled       = build_crew_unfilled(filtered, ref)
-    crew_filled         = build_crew_filled(filtered, ref)
-    contractor_unfilled = build_contractor_unfilled(filtered, ref)
-    contractor_filled   = build_contractor_filled(filtered, ref)
-    
-    for name, df in filtered.items():
-        print(f"{name}: {len(df)} rows")
-
-    print(f"Crew Unfilled:       {len(crew_unfilled)} rows")
-    print(f"Crew Filled:         {len(crew_filled)} rows")
-    print(f"Contractor Unfilled: {len(contractor_unfilled)} rows")
-    print(f"Contractor Filled:   {len(contractor_filled)} rows")
-
-    output_path = write_output_workbook(
-        crew_unfilled, crew_filled, contractor_unfilled, contractor_filled,
-        ret_addr="test"
-    )
-    print(f"Output written to: {output_path}")
-    
-"""if __name__ == "__main__":
-    discovered = discover_files(BUCKET_NAME)
-    local_files = download_all_files(BUCKET_NAME, discovered)
-    filtered = filter_all_files(local_files)
-
-    dept_codes = load_dept_codes(DEPTS_BUCKET, CC_ID_FILE)
-    filtered["candidates"] = filter_candidates(local_files["candidates"], dept_codes)
-
-    for name, df in filtered.items():
-        print(f"{name}: {len(df)} rows")
-
-    ref = load_reference_data(DEPTS_BUCKET)
-    for name, df in ref.items():
-        print(f"{name}: {len(df)} rows, columns: {list(df.columns)}")"""

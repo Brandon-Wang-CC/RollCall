@@ -1,0 +1,68 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Description: SNS topics for the RollCall ETL pipeline
+
+Parameters:
+  AlarmEmail:
+    Type: String
+    Description: Email address that receives CloudWatch alarm notifications on Lambda errors
+  Env:
+    Type: String
+    Default: ""
+    Description: Suffix appended to all resource names (e.g. "-test") — set in deploy-config.yaml to deploy alongside production without name collisions
+
+Resources:
+
+  # Published by SES receipt rule when email arrives; subscribed by CSV-Parser-queue
+  EmailReceivedTopic:
+    Type: AWS::SNS::Topic
+    Properties:
+      TopicName: !Sub "emailReceived${Env}"
+
+  EmailReceivedToCSVParserSubscription:
+    Type: AWS::SNS::Subscription
+    Properties:
+      TopicArn: !Ref EmailReceivedTopic
+      Protocol: sqs
+      Endpoint: !Sub arn:aws:sqs:${AWS::Region}:${AWS::AccountId}:CSV-Parser-queue${Env}
+
+  # Published by csvParser after uploading processed files; subscribed by rollcall-sqs
+  DataReceivedTopic:
+    Type: AWS::SNS::Topic
+    Properties:
+      TopicName: !Sub "dataReceived${Env}"
+
+  DataReceivedToRollCallSubscription:
+    Type: AWS::SNS::Subscription
+    Properties:
+      TopicArn: !Ref DataReceivedTopic
+      Protocol: sqs
+      Endpoint: !Sub arn:aws:sqs:${AWS::Region}:${AWS::AccountId}:rollcall-sqs${Env}
+
+  # CloudWatch alarm notification for csvParser errors
+  Lambda1ErrorNotifTopic:
+    Type: AWS::SNS::Topic
+    Properties:
+      TopicName: !Sub "Lambda1_Error_Notif${Env}"
+      Subscription:
+        - Protocol: email
+          Endpoint: !Ref AlarmEmail
+
+  # CloudWatch alarm notification for rollcall-lambda errors
+  Lambda2ErrorNotifTopic:
+    Type: AWS::SNS::Topic
+    Properties:
+      TopicName: !Sub "Lambda2_Error_Notif${Env}"
+      Subscription:
+        - Protocol: email
+          Endpoint: !Ref AlarmEmail
+
+Outputs:
+  EmailReceivedTopicArn:
+    Value: !Ref EmailReceivedTopic
+    Export:
+      Name: !Sub "sns-emailReceived-arn${Env}"
+
+  DataReceivedTopicArn:
+    Value: !Ref DataReceivedTopic
+    Export:
+      Name: !Sub "sns-dataReceived-arn${Env}"

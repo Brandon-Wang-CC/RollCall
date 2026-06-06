@@ -1,0 +1,29 @@
+# GitHub Actions deployment configuration
+# Edit these values to target a different AWS account or region.
+# Commit changes — the deploy workflow reads this file at run time.
+#
+# Prerequisites in the target AWS account:
+#   1. An OIDC identity provider for token.actions.githubusercontent.com
+#   2. An IAM role trusted by that provider with permissions to deploy
+#      CloudFormation stacks, Lambda functions, and read/write S3.
+#      See: https://docs.github.com/en/actions/security-for-github-actions/security-hardening-your-deployments/configuring-openid-connect-in-amazon-web-services
+
+aws:
+  region: us-east-1
+  # IAM role GitHub Actions assumes via OIDC — no long-lived credentials required.
+  # Find it in the AWS Console under IAM → Roles → GitHubActionsDeploy, or run:
+  #   aws iam get-role --role-name GitHubActionsDeploy --query Role.Arn --output text
+  oidcRoleArn: arn:aws:iam::844905860028:role/GitHubActionsDeploy
+
+# CloudFormation stack names — change these to avoid collisions if deploying
+# multiple environments into the same account.
+stacks:
+  iam: rollcall-iam
+  s3: rollcall-s3
+  sns: rollcall-sns
+  sqs: rollcall-sqs
+  ses: rollcall-ses
+  cloudwatch: rollcall-cloudwatch
+  csvParser: rollcall-csv-parser
+  rollcallLambda: rollcall-lambda
+  sesEmailer: rollcall-ses-emailer
