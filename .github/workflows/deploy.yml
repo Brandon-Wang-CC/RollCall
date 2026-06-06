@@ -140,7 +140,7 @@ jobs:
             --template-file infrastructure/iam.yaml \
             --stack-name $STACK_IAM \
             --capabilities CAPABILITY_NAMED_IAM \
-            --parameter-overrides CsvBucket=$CSV_BUCKET DeptsBucket=$DEPTS_BUCKET SesBucket=$SES_BUCKET Env="$ENV_SUFFIX" \
+            --parameter-overrides CsvBucket=$CSV_BUCKET DeptsBucket=$DEPTS_BUCKET SesBucket=$SES_BUCKET SenderDomain=$SENDER_DOMAIN Env="$ENV_SUFFIX" \
             --no-fail-on-empty-changeset
 
       - name: Deploy S3 buckets

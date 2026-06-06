@@ -66,7 +66,9 @@ Resources:
           Type: SQS
           Properties:
             Queue: !Sub arn:aws:sqs:${AWS::Region}:${AWS::AccountId}:rollcall-sqs${Env}
-            BatchSize: 10
+            BatchSize: 1
+            FunctionResponseTypes:
+              - ReportBatchItemFailures
       LoggingConfig:
         LogFormat: Text
         LogGroup: !Sub /aws/lambda/rollcall-lambda${Env}
