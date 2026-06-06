@@ -19,8 +19,8 @@ Resources:
       TopicName: !Sub "emailReceived${Env}"
 
   # Grants SES permission to publish — required for the S3 receipt rule action.
-  # Must use Service principal; Principal: {"AWS":"*"} does not satisfy SES receipt
-  # rule validation even with AWS:SourceAccount condition.
+  # No AWS:SourceAccount condition: SES does not set that key in its validation
+  # call, so the condition always evaluates false and blocks receipt rule creation.
   EmailReceivedTopicPolicy:
     Type: AWS::SNS::TopicPolicy
     Properties:
@@ -35,9 +35,6 @@ Resources:
               Service: ses.amazonaws.com
             Action: SNS:Publish
             Resource: !Ref EmailReceivedTopic
-            Condition:
-              StringEquals:
-                AWS:SourceAccount: !Ref AWS::AccountId
 
   EmailReceivedToCSVParserSubscription:
     Type: AWS::SNS::Subscription
