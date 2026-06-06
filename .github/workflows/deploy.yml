@@ -5,8 +5,7 @@ on:
     inputs:
       env:
         description: 'Resource name suffix appended to all AWS resource names (e.g. "-test" for an isolated test deploy, leave empty for production)'
-        required: false
-        default: ''
+        required: true
   # push:
   #   branches:
   #     - master
