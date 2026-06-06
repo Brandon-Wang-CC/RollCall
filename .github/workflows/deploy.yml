@@ -15,6 +15,10 @@ on:
   #   branches:
   #     - master
 
+permissions:
+  id-token: write
+  contents: read
+
 jobs:
   # ── Read both config files and expose values to the deploy job ───────────────
   load-config:
