@@ -4,8 +4,13 @@ on:
   workflow_dispatch:
     inputs:
       env:
-        description: 'Resource name suffix appended to all AWS resource names (e.g. "-test" for an isolated test deploy, leave empty for production)'
+        description: 'Target environment'
         required: true
+        type: choice
+        options:
+          - eng
+          - test
+          - prod
   # push:
   #   branches:
   #     - master
@@ -98,7 +103,7 @@ jobs:
 
     env:
       AWS_REGION:        ${{ needs.load-config.outputs.aws-region }}
-      ENV_SUFFIX:        ${{ inputs.env }}
+      ENV_SUFFIX:        -${{ inputs.env }}
       CSV_BUCKET:        ${{ needs.load-config.outputs.csv-bucket }}
       DEPTS_BUCKET:      ${{ needs.load-config.outputs.depts-bucket }}
       SES_BUCKET:        ${{ needs.load-config.outputs.ses-bucket }}

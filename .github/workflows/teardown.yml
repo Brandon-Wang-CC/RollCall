@@ -4,8 +4,13 @@ on:
   workflow_dispatch:
     inputs:
       env:
-        description: 'Resource name suffix of the deploy to tear down (e.g. "-test"). Must match what was used at deploy time.'
+        description: 'Target environment to tear down'
         required: true
+        type: choice
+        options:
+          - eng
+          - test
+          - prod
 
 jobs:
   # ── Read config files (identical to deploy workflow) ─────────────────────────
@@ -69,7 +74,7 @@ jobs:
 
     env:
       AWS_REGION:       ${{ needs.load-config.outputs.aws-region }}
-      ENV_SUFFIX:       ${{ inputs.env }}
+      ENV_SUFFIX:       -${{ inputs.env }}
       CSV_BUCKET:       ${{ needs.load-config.outputs.csv-bucket }}
       DEPTS_BUCKET:     ${{ needs.load-config.outputs.depts-bucket }}
       SES_BUCKET:       ${{ needs.load-config.outputs.ses-bucket }}
