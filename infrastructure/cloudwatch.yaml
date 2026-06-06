@@ -1,0 +1,48 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Description: CloudWatch alarms for RollCall Lambda error monitoring
+
+Parameters:
+  Env:
+    Type: String
+    Default: ""
+    Description: Suffix appended to all resource names (e.g. "-test") — set in deploy-config.yaml to deploy alongside production without name collisions
+
+Resources:
+
+  # Fires when csvParser has any errors in a 5-minute window
+  CSVParserErrorAlarm:
+    Type: AWS::CloudWatch::Alarm
+    Properties:
+      AlarmName: !Sub "Lambda1_Errors${Env}"
+      ActionsEnabled: true
+      AlarmActions:
+        - !Sub arn:aws:sns:${AWS::Region}:${AWS::AccountId}:Lambda1_Error_Notif${Env}
+      Namespace: AWS/Lambda
+      MetricName: Errors
+      Statistic: Sum
+      Dimensions:
+        - Name: FunctionName
+          Value: !Sub "csvParser${Env}"
+      Period: 300
+      EvaluationPeriods: 1
+      Threshold: 0
+      ComparisonOperator: GreaterThanThreshold
+
+  # Fires when rollcall-lambda has any errors in a 5-minute window
+  RollCallLambdaErrorAlarm:
+    Type: AWS::CloudWatch::Alarm
+    Properties:
+      AlarmName: !Sub "Lambda2_Errors${Env}"
+      ActionsEnabled: true
+      AlarmActions:
+        - !Sub arn:aws:sns:${AWS::Region}:${AWS::AccountId}:Lambda2_Error_Notif${Env}
+      Namespace: AWS/Lambda
+      MetricName: Errors
+      Statistic: Sum
+      Dimensions:
+        - Name: FunctionName
+          Value: !Sub "rollcall-lambda${Env}"
+      Period: 300
+      EvaluationPeriods: 1
+      Threshold: 0
+      ComparisonOperator: GreaterThanThreshold

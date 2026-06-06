@@ -1,0 +1,80 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Transform: AWS::Serverless-2016-10-31
+Description: rollcall-lambda — processes XLSX recruitment reports and writes output workbook to DeptsBucket
+
+# Handler: lambda_function.lambda_handler
+# Trigger:  SQS rollcall-sqs (from SNS dataReceived, published by csvParser)
+# Output:   ESF WF data file.xlsx written to DeptsBucket/{retAddr}/
+# Source:   https://github.com/Brandon-Wang-CC/RollCall
+
+Parameters:
+  CsvBucket:
+    Type: String
+    Description: S3 bucket for processed XLSX attachments (csvParser writes, rollcall-lambda reads)
+  DeptsBucket:
+    Type: String
+    Description: S3 bucket for reference data and output workbook
+  FilePrefixUnfilled:
+    Type: String
+    Description: Filename prefix for the unfilled requisitions report
+  FilePrefixContractorOpen:
+    Type: String
+    Description: Filename prefix for the open contractor requisitions report
+  FilePrefixContractorClosed:
+    Type: String
+    Description: Filename prefix for the closed contractor requisitions report
+  FilePrefixCandidates:
+    Type: String
+    Description: Filename prefix for the candidate flow report
+  MD1Name:
+    Type: String
+    Description: Name and employee ID stamped into the MD-1 column of every output row
+  Env:
+    Type: String
+    Default: ""
+    Description: Suffix appended to all resource names (e.g. "-test") — set in deploy-config.yaml to deploy alongside production without name collisions
+
+Resources:
+
+  RollCallLambdaFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      FunctionName: !Sub "rollcall-lambda${Env}"
+      Handler: lambda_function.lambda_handler
+      Runtime: python3.12
+      CodeUri: ./
+      MemorySize: 1024
+      Timeout: 300
+      Role: !Sub arn:aws:iam::${AWS::AccountId}:role/service-role/rollcall-lambda-role${Env}
+      Layers:
+        - !Sub arn:aws:lambda:${AWS::Region}:336392948345:layer:AWSSDKPandas-Python312:24
+      Environment:
+        Variables:
+          CSV_BUCKET: !Ref CsvBucket
+          DEPTS_BUCKET: !Ref DeptsBucket
+          FILE_PREFIX_UNFILLED: !Ref FilePrefixUnfilled
+          FILE_PREFIX_CONTRACTOR_OPEN: !Ref FilePrefixContractorOpen
+          FILE_PREFIX_CONTRACTOR_CLOSED: !Ref FilePrefixContractorClosed
+          FILE_PREFIX_CANDIDATES: !Ref FilePrefixCandidates
+          MD1_NAME: !Ref MD1Name
+      Architectures:
+        - x86_64
+      EphemeralStorage:
+        Size: 1024
+      Events:
+        SQSTrigger:
+          Type: SQS
+          Properties:
+            Queue: !Sub arn:aws:sqs:${AWS::Region}:${AWS::AccountId}:rollcall-sqs${Env}
+            BatchSize: 1
+            FunctionResponseTypes:
+              - ReportBatchItemFailures
+      LoggingConfig:
+        LogFormat: Text
+        LogGroup: !Sub /aws/lambda/rollcall-lambda${Env}
+
+Outputs:
+  RollCallLambdaArn:
+    Value: !GetAtt RollCallLambdaFunction.Arn
+    Export:
+      Name: !Sub "rollcall-lambda-arn${Env}"

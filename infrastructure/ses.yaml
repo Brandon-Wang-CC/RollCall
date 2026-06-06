@@ -1,0 +1,45 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Description: SES receipt rules and email identities for the RollCall ETL pipeline
+
+Parameters:
+  SenderDomain:
+    Type: String
+    Description: Domain verified in SES for inbound and outbound email
+  SesBucket:
+    Type: String
+    Description: S3 bucket where SES delivers raw inbound emails
+  Env:
+    Type: String
+    Default: ""
+    Description: Suffix appended to all resource names (e.g. "-test") — set in deploy-config.yaml to deploy alongside production without name collisions
+
+Resources:
+
+  SESReceiptRuleSet:
+    Type: AWS::SES::ReceiptRuleSet
+    Properties:
+      RuleSetName: !Sub "DeliverToS3${Env}"
+
+  # Catches all inbound mail for the configured domain, saves to S3 with SNS notification
+  DeliverToS3Rule:
+    Type: AWS::SES::ReceiptRule
+    DependsOn: SESReceiptRuleSet
+    Properties:
+      RuleSetName: !Sub "DeliverToS3${Env}"
+      Rule:
+        Name: !Sub "DeliverToS3${Env}"
+        Enabled: true
+        TlsPolicy: Optional
+        ScanEnabled: true
+        Actions:
+          - S3Action:
+              TopicArn: !Sub arn:aws:sns:${AWS::Region}:${AWS::AccountId}:emailReceived${Env}
+              BucketName: !Ref SesBucket
+              ObjectKeyPrefix: RAW_EMAIL
+              IamRoleArn: !Sub arn:aws:iam::${AWS::AccountId}:role/SESWriteToS3${Env}
+
+  # Sending domain for monitored email account
+  DomainIdentity:
+    Type: AWS::SES::EmailIdentity
+    Properties:
+      EmailIdentity: !Ref SenderDomain
