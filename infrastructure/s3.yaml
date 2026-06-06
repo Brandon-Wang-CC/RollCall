@@ -59,6 +59,8 @@ Resources:
                 aws:SecureTransport: 'false'
 
   # Holds reference CSVs and output XLSX; S3 event on .xlsx triggers ses-emailer-function
+  # Note: the Lambda notification is wired in deploy.yml after ses-emailer is deployed —
+  # S3 validates the Lambda ARN exists at bucket creation time, so it cannot be declared here.
   RollCallDeptsBucket:
     Type: AWS::S3::Bucket
     Properties:
@@ -72,15 +74,6 @@ Resources:
         BlockPublicPolicy: true
         IgnorePublicAcls: true
         RestrictPublicBuckets: true
-      NotificationConfiguration:
-        LambdaConfigurations:
-          - Event: s3:ObjectCreated:Put
-            Filter:
-              S3Key:
-                Rules:
-                  - Name: suffix
-                    Value: xlsx
-            Function: !Sub arn:aws:lambda:${AWS::Region}:${AWS::AccountId}:function:ses-emailer-function${Env}
 
   RollCallDeptsBucketPolicy:
     Type: AWS::S3::BucketPolicy
