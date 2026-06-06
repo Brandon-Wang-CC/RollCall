@@ -143,6 +143,22 @@ jobs:
         with:
           use-installer: true
 
+      # ── Pre-flight: clear any stacks stuck in ROLLBACK_COMPLETE ──────────────
+      # cloudformation deploy creates a changeset, which fails on ROLLBACK_COMPLETE.
+      # Deleting first lets the next step recreate from scratch.
+
+      - name: Delete stacks stuck in ROLLBACK_COMPLETE
+        run: |
+          for stack in $STACK_IAM $STACK_S3 $STACK_SNS $STACK_SQS $STACK_SES $STACK_CLOUDWATCH $STACK_CSV_PARSER $STACK_ROLLCALL $STACK_SES_EMAILER; do
+            status=$(aws cloudformation describe-stacks --stack-name "$stack" --region $AWS_REGION \
+              --query "Stacks[0].StackStatus" --output text 2>/dev/null || echo "DOES_NOT_EXIST")
+            if [ "$status" = "ROLLBACK_COMPLETE" ]; then
+              echo "Deleting $stack (ROLLBACK_COMPLETE)..."
+              aws cloudformation delete-stack --stack-name "$stack" --region $AWS_REGION
+              aws cloudformation wait stack-delete-complete --stack-name "$stack" --region $AWS_REGION
+            fi
+          done
+
       # ── Infrastructure ────────────────────────────────────────────────────────
 
       - name: Deploy IAM roles
