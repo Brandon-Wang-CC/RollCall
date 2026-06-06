@@ -239,6 +239,12 @@ def lambda_handler(event, context):
     logger.info(f"Event received: {json.dumps(event, indent=2)}")
     sender_email =json.loads(json.loads(event["Records"][0]["body"])["Message"])["mail"]["source"]
     logger.info(f"Email source detected: {sender_email}")
+
+    BLOCKED_SENDERS = {"no-reply-aws@amazon.com"}
+    if sender_email in BLOCKED_SENDERS:
+        logger.info(f"Ignoring email from blocked sender: {sender_email}")
+        return {"status": "ignored", "reason": "blocked sender"}
+
     total_files = 0
     processed_files = []
 
