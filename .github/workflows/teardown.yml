@@ -5,8 +5,7 @@ on:
     inputs:
       env:
         description: 'Resource name suffix of the deploy to tear down (e.g. "-test"). Must match what was used at deploy time.'
-        required: false
-        default: ''
+        required: true
 
 jobs:
   # ── Read config files (identical to deploy workflow) ─────────────────────────
