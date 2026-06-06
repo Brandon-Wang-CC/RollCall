@@ -2,6 +2,11 @@ name: Deploy
 
 on:
   workflow_dispatch:
+    inputs:
+      env:
+        description: 'Resource name suffix appended to all AWS resource names (e.g. "-test" for an isolated test deploy, leave empty for production)'
+        required: false
+        default: ''
   # push:
   #   branches:
   #     - master
@@ -13,7 +18,6 @@ jobs:
     outputs:
       aws-region:        ${{ steps.read.outputs.aws-region }}
       oidc-role-arn:     ${{ steps.read.outputs.oidc-role-arn }}
-      env-suffix:        ${{ steps.read.outputs.env-suffix }}
       stack-iam:         ${{ steps.read.outputs.stack-iam }}
       stack-s3:          ${{ steps.read.outputs.stack-s3 }}
       stack-sns:         ${{ steps.read.outputs.stack-sns }}
@@ -60,7 +64,6 @@ jobs:
           outputs = {
             'aws-region':        config['aws']['region'],
             'oidc-role-arn':     config['aws']['oidcRoleArn'],
-            'env-suffix':        config['aws'].get('env', ''),
             'stack-iam':         config['stacks']['iam'],
             'stack-s3':          config['stacks']['s3'],
             'stack-sns':         config['stacks']['sns'],
@@ -96,7 +99,7 @@ jobs:
 
     env:
       AWS_REGION:        ${{ needs.load-config.outputs.aws-region }}
-      ENV_SUFFIX:        ${{ needs.load-config.outputs.env-suffix }}
+      ENV_SUFFIX:        ${{ inputs.env }}
       CSV_BUCKET:        ${{ needs.load-config.outputs.csv-bucket }}
       DEPTS_BUCKET:      ${{ needs.load-config.outputs.depts-bucket }}
       SES_BUCKET:        ${{ needs.load-config.outputs.ses-bucket }}
