@@ -2,9 +2,6 @@ AWSTemplateFormatVersion: '2010-09-09'
 Description: SES receipt rules and email identities for the RollCall ETL pipeline
 
 Parameters:
-  SenderDomain:
-    Type: String
-    Description: Domain verified in SES for inbound and outbound email
   SesBucket:
     Type: String
     Description: S3 bucket where SES delivers raw inbound emails
@@ -38,8 +35,3 @@ Resources:
               ObjectKeyPrefix: RAW_EMAIL
               IamRoleArn: !Sub arn:aws:iam::${AWS::AccountId}:role/SESWriteToS3${Env}
 
-  # Sending domain for monitored email account
-  DomainIdentity:
-    Type: AWS::SES::EmailIdentity
-    Properties:
-      EmailIdentity: !Ref SenderDomain
