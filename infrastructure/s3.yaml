@@ -11,6 +11,10 @@ Parameters:
   SesBucket:
     Type: String
     Description: S3 bucket where SES delivers raw inbound emails
+  Env:
+    Type: String
+    Default: ""
+    Description: Suffix appended to all resource names (e.g. "-test") — set in deploy-config.yaml to deploy alongside production without name collisions
 
 Resources:
 
@@ -27,7 +31,6 @@ Resources:
             Status: Enabled
             ExpirationInDays: 30
 
-
   # Holds reference CSVs and output XLSX; S3 event on .xlsx triggers ses-emailer-function
   RollCallDeptsBucket:
     Type: AWS::S3::Bucket
@@ -42,7 +45,7 @@ Resources:
                 Rules:
                   - Name: suffix
                     Value: xlsx
-            Function: !Sub arn:aws:lambda:${AWS::Region}:${AWS::AccountId}:function:ses-emailer-function
+            Function: !Sub arn:aws:lambda:${AWS::Region}:${AWS::AccountId}:function:ses-emailer-function${Env}
 
   # Raw inbound email storage; SES delivers here, csvParser reads from here
   RollCallSESBucket:
