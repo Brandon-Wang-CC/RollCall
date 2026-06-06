@@ -159,7 +159,7 @@ jobs:
           aws cloudformation deploy \
             --template-file infrastructure/s3.yaml \
             --stack-name $STACK_S3 \
-            --parameter-overrides CsvBucket=$CSV_BUCKET DeptsBucket=$DEPTS_BUCKET SesBucket=$SES_BUCKET Env="$ENV_SUFFIX" \
+            --parameter-overrides CsvBucket=$CSV_BUCKET DeptsBucket=$DEPTS_BUCKET SesBucket=$SES_BUCKET \
             --no-fail-on-empty-changeset
 
       - name: Upload reference data to S3
@@ -241,6 +241,26 @@ jobs:
             --parameter-overrides SenderEmail=$SENDER_EMAIL DeptsBucket=$DEPTS_BUCKET Env="$ENV_SUFFIX" \
             --no-confirm-changeset \
             --no-fail-on-empty-changeset
+
+      # Wire DeptsBucket → ses-emailer after the Lambda exists.
+      # S3 validates the Lambda ARN at bucket-creation time, so the notification
+      # cannot live in s3.yaml (which deploys before any Lambda stack).
+      - name: Wire DeptsBucket S3 notification to ses-emailer
+        run: |
+          ACCOUNT_ID=$(aws sts get-caller-identity --query Account --output text)
+          LAMBDA_ARN="arn:aws:lambda:${AWS_REGION}:${ACCOUNT_ID}:function:ses-emailer-function${ENV_SUFFIX}"
+
+          aws lambda add-permission \
+            --function-name "ses-emailer-function${ENV_SUFFIX}" \
+            --statement-id "s3-depts-trigger" \
+            --action lambda:InvokeFunction \
+            --principal s3.amazonaws.com \
+            --source-arn "arn:aws:s3:::${DEPTS_BUCKET}" \
+            --region $AWS_REGION 2>/dev/null || true
+
+          aws s3api put-bucket-notification-configuration \
+            --bucket "$DEPTS_BUCKET" \
+            --notification-configuration "{\"LambdaFunctionConfigurations\":[{\"LambdaFunctionArn\":\"${LAMBDA_ARN}\",\"Events\":[\"s3:ObjectCreated:Put\"],\"Filter\":{\"Key\":{\"FilterRules\":[{\"Name\":\"Suffix\",\"Value\":\"xlsx\"}]}}}]}"
 
       # ── CloudWatch alarms ─────────────────────────────────────────────────────
 
