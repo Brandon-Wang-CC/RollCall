@@ -12,6 +12,10 @@ on:
           - test
           - prod
 
+permissions:
+  id-token: write
+  contents: read
+
 jobs:
   # ── Read config files (identical to deploy workflow) ─────────────────────────
   load-config:
