@@ -34,9 +34,9 @@ FilePrefixCandidates: "GR&S Candidate Flow Weekly Report"
 # Must be a subdomain of your organization's primary domain — do NOT use the root domain,
 # as the MX record required for SES email receiving would redirect all employee email to AWS.
 # Example: pipeline.yourdomain.com
-SenderDomain: "pipeline.vanguard.com"
+SenderDomain: "vg-rollcall.com"
 
 # The "From" address used when emailing the output workbook back to the requester.
 # Must be an address within SenderDomain.
 # Example: rollcall@pipeline.yourdomain.com
-SenderEmail: "rollcall@pipeline.vanguard.com"
+SenderEmail: "headcount-bot@vg-rollcall.com"
