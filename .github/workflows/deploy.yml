@@ -251,6 +251,7 @@ jobs:
       # ── Post-deploy ───────────────────────────────────────────────────────────
 
       - name: Activate SES receipt rule set
+        if: inputs.env == 'prod'
         run: |
           aws ses set-active-receipt-rule-set \
             --rule-set-name "DeliverToS3${ENV_SUFFIX}" \
