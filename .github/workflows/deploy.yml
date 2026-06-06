@@ -104,9 +104,9 @@ jobs:
     env:
       AWS_REGION:        ${{ needs.load-config.outputs.aws-region }}
       ENV_SUFFIX:        -${{ inputs.env }}
-      CSV_BUCKET:        ${{ needs.load-config.outputs.csv-bucket }}
-      DEPTS_BUCKET:      ${{ needs.load-config.outputs.depts-bucket }}
-      SES_BUCKET:        ${{ needs.load-config.outputs.ses-bucket }}
+      CSV_BUCKET:        ${{ needs.load-config.outputs.csv-bucket }}-${{ inputs.env }}
+      DEPTS_BUCKET:      ${{ needs.load-config.outputs.depts-bucket }}-${{ inputs.env }}
+      SES_BUCKET:        ${{ needs.load-config.outputs.ses-bucket }}-${{ inputs.env }}
       SENDER_DOMAIN:     ${{ needs.load-config.outputs.sender-domain }}
       SENDER_EMAIL:      ${{ needs.load-config.outputs.sender-email }}
       STACK_IAM:         ${{ needs.load-config.outputs.stack-iam }}
