@@ -14,19 +14,23 @@ Parameters:
   DeptsBucket:
     Type: String
     Description: S3 bucket that triggers this function on .xlsx upload
+  Env:
+    Type: String
+    Default: ""
+    Description: Suffix appended to all resource names (e.g. "-test") — set in deploy-config.yaml to deploy alongside production without name collisions
 
 Resources:
 
   SESEmailerFunction:
     Type: AWS::Serverless::Function
     Properties:
-      FunctionName: ses-emailer-function
+      FunctionName: !Sub "ses-emailer-function${Env}"
       Handler: lambda_function.lambda_handler
       Runtime: python3.11
       CodeUri: ./
       MemorySize: 1024
       Timeout: 63
-      Role: !Sub arn:aws:iam::${AWS::AccountId}:role/service-role/ses-emailer-function-role
+      Role: !Sub arn:aws:iam::${AWS::AccountId}:role/service-role/ses-emailer-function-role${Env}
       Environment:
         Variables:
           SENDER_EMAIL: !Ref SenderEmail
@@ -36,7 +40,7 @@ Resources:
         Size: 1024
       LoggingConfig:
         LogFormat: Text
-        LogGroup: /aws/lambda/ses-emailer-function
+        LogGroup: !Sub /aws/lambda/ses-emailer-function${Env}
 
   # Permission for S3 to invoke this function
   S3InvokePermission:
@@ -51,4 +55,4 @@ Outputs:
   SESEmailerFunctionArn:
     Value: !GetAtt SESEmailerFunction.Arn
     Export:
-      Name: ses-emailer-function-arn
+      Name: !Sub "ses-emailer-function-arn${Env}"
