@@ -10,24 +10,28 @@ Parameters:
   CsvBucket:
     Type: String
     Description: S3 bucket to write processed XLSX attachments to
+  Env:
+    Type: String
+    Default: ""
+    Description: Suffix appended to all resource names (e.g. "-test") — set in deploy-config.yaml to deploy alongside production without name collisions
 
 Resources:
 
   CSVParserFunction:
     Type: AWS::Serverless::Function
     Properties:
-      FunctionName: csvParser
+      FunctionName: !Sub "csvParser${Env}"
       Handler: theLambda.lambda_handler
       Runtime: python3.12
       CodeUri: ./
       MemorySize: 2048
       Timeout: 300
-      Role: !Sub arn:aws:iam::${AWS::AccountId}:role/service-role/csvParser-role
+      Role: !Sub arn:aws:iam::${AWS::AccountId}:role/service-role/csvParser-role${Env}
       Layers:
         - !Sub arn:aws:lambda:${AWS::Region}:336392948345:layer:AWSSDKPandas-Python314:7
       Environment:
         Variables:
-          SNS_TOPIC_ARN: !Sub arn:aws:sns:${AWS::Region}:${AWS::AccountId}:dataReceived
+          SNS_TOPIC_ARN: !Sub arn:aws:sns:${AWS::Region}:${AWS::AccountId}:dataReceived${Env}
           CSV_BUCKET: !Ref CsvBucket
       Architectures:
         - x86_64
@@ -37,14 +41,16 @@ Resources:
         SQSTrigger:
           Type: SQS
           Properties:
-            Queue: !Sub arn:aws:sqs:${AWS::Region}:${AWS::AccountId}:CSV-Parser-queue
-            BatchSize: 10
+            Queue: !Sub arn:aws:sqs:${AWS::Region}:${AWS::AccountId}:CSV-Parser-queue${Env}
+            BatchSize: 1
+            FunctionResponseTypes:
+              - ReportBatchItemFailures
       LoggingConfig:
         LogFormat: Text
-        LogGroup: /aws/lambda/csvParser
+        LogGroup: !Sub /aws/lambda/csvParser${Env}
 
 Outputs:
   CSVParserFunctionArn:
     Value: !GetAtt CSVParserFunction.Arn
     Export:
-      Name: csvParser-function-arn
+      Name: !Sub "csvParser-function-arn${Env}"
