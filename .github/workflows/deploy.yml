@@ -19,7 +19,7 @@ on:
       - main
 
 concurrency:
-  group: deploy-${{ inputs.env || 'prod' }}
+  group: deploy-${{ inputs.env || 'eng' }}
   cancel-in-progress: false
 
 permissions:
@@ -115,21 +115,24 @@ jobs:
 
     env:
       AWS_REGION:        ${{ needs.load-config.outputs.aws-region }}
-      ENV_SUFFIX:        -${{ inputs.env || 'prod' }}
-      CSV_BUCKET:        ${{ needs.load-config.outputs.csv-bucket }}-${{ inputs.env || 'prod' }}
-      DEPTS_BUCKET:      ${{ needs.load-config.outputs.depts-bucket }}-${{ inputs.env || 'prod' }}
-      SES_BUCKET:        ${{ needs.load-config.outputs.ses-bucket }}-${{ inputs.env || 'prod' }}
+      # For prod: ENV_SUFFIX="" and stack names have no suffix (existing prod stacks).
+      # For all other envs: ENV_SUFFIX="-<env>" and stack names get the same suffix,
+      # keeping each environment's CloudFormation stacks fully isolated.
+      ENV_SUFFIX:        ${{ inputs.env != 'prod' && format('-{0}', inputs.env || 'eng') || '' }}
+      CSV_BUCKET:        ${{ needs.load-config.outputs.csv-bucket }}${{ inputs.env != 'prod' && format('-{0}', inputs.env || 'eng') || '' }}
+      DEPTS_BUCKET:      ${{ needs.load-config.outputs.depts-bucket }}${{ inputs.env != 'prod' && format('-{0}', inputs.env || 'eng') || '' }}
+      SES_BUCKET:        ${{ needs.load-config.outputs.ses-bucket }}${{ inputs.env != 'prod' && format('-{0}', inputs.env || 'eng') || '' }}
       SENDER_DOMAIN:     ${{ needs.load-config.outputs.sender-domain }}
       SENDER_EMAIL:      ${{ needs.load-config.outputs.sender-email }}
-      STACK_IAM:         ${{ needs.load-config.outputs.stack-iam }}
-      STACK_S3:          ${{ needs.load-config.outputs.stack-s3 }}
-      STACK_SNS:         ${{ needs.load-config.outputs.stack-sns }}
-      STACK_SQS:         ${{ needs.load-config.outputs.stack-sqs }}
-      STACK_SES:         ${{ needs.load-config.outputs.stack-ses }}
-      STACK_CLOUDWATCH:  ${{ needs.load-config.outputs.stack-cloudwatch }}
-      STACK_CSV_PARSER:  ${{ needs.load-config.outputs.stack-csv-parser }}
-      STACK_ROLLCALL:    ${{ needs.load-config.outputs.stack-rollcall }}
-      STACK_SES_EMAILER:              ${{ needs.load-config.outputs.stack-ses-emailer }}
+      STACK_IAM:         ${{ needs.load-config.outputs.stack-iam }}${{ inputs.env != 'prod' && format('-{0}', inputs.env || 'eng') || '' }}
+      STACK_S3:          ${{ needs.load-config.outputs.stack-s3 }}${{ inputs.env != 'prod' && format('-{0}', inputs.env || 'eng') || '' }}
+      STACK_SNS:         ${{ needs.load-config.outputs.stack-sns }}${{ inputs.env != 'prod' && format('-{0}', inputs.env || 'eng') || '' }}
+      STACK_SQS:         ${{ needs.load-config.outputs.stack-sqs }}${{ inputs.env != 'prod' && format('-{0}', inputs.env || 'eng') || '' }}
+      STACK_SES:         ${{ needs.load-config.outputs.stack-ses }}${{ inputs.env != 'prod' && format('-{0}', inputs.env || 'eng') || '' }}
+      STACK_CLOUDWATCH:  ${{ needs.load-config.outputs.stack-cloudwatch }}${{ inputs.env != 'prod' && format('-{0}', inputs.env || 'eng') || '' }}
+      STACK_CSV_PARSER:  ${{ needs.load-config.outputs.stack-csv-parser }}${{ inputs.env != 'prod' && format('-{0}', inputs.env || 'eng') || '' }}
+      STACK_ROLLCALL:    ${{ needs.load-config.outputs.stack-rollcall }}${{ inputs.env != 'prod' && format('-{0}', inputs.env || 'eng') || '' }}
+      STACK_SES_EMAILER: ${{ needs.load-config.outputs.stack-ses-emailer }}${{ inputs.env != 'prod' && format('-{0}', inputs.env || 'eng') || '' }}
       FILE_PREFIX_UNFILLED:           ${{ needs.load-config.outputs.file-prefix-unfilled }}
       FILE_PREFIX_CONTRACTOR_OPEN:    ${{ needs.load-config.outputs.file-prefix-contractor-open }}
       FILE_PREFIX_CONTRACTOR_CLOSED:  ${{ needs.load-config.outputs.file-prefix-contractor-closed }}
@@ -308,7 +311,7 @@ jobs:
       #   aws ses set-active-receipt-rule-set --rule-set-name DeliverToS3-<env> --region <region>
       # Remember to reactivate prod (DeliverToS3) when done.
       - name: Activate SES receipt rule set
-        if: inputs.env == 'prod' || github.event_name == 'push'
+        if: inputs.env == 'prod'
         run: |
           aws ses set-active-receipt-rule-set \
             --rule-set-name "DeliverToS3${ENV_SUFFIX}" \
