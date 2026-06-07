@@ -61,6 +61,16 @@ Resources:
                 Effect: Allow
                 Action: sns:Publish
                 Resource: !Sub arn:aws:sns:${AWS::Region}:${AWS::AccountId}:dataReceived${Env}
+        - PolicyName: SESFailureEmail
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Effect: Allow
+                Action:
+                  - ses:SendEmail
+                  - ses:SendRawEmail
+                Resource:
+                  - !Sub arn:aws:ses:${AWS::Region}:${AWS::AccountId}:identity/*
         - PolicyName: SQS
           PolicyDocument:
             Version: '2012-10-17'
@@ -73,7 +83,6 @@ Resources:
                   - sqs:GetQueueAttributes
                 Resource:
                   - !Sub arn:aws:sqs:${AWS::Region}:${AWS::AccountId}:CSV-Parser-queue${Env}
-                  - !Sub arn:aws:sqs:${AWS::Region}:${AWS::AccountId}:csv-parser-dlq${Env}
 
   # ─── rollcall-lambda ─────────────────────────────────────────────────────────
 
@@ -115,6 +124,16 @@ Resources:
               - Effect: Allow
                 Action: lambda:InvokeFunction
                 Resource: !Sub arn:aws:lambda:${AWS::Region}:${AWS::AccountId}:function:ses-emailer-function${Env}
+        - PolicyName: SESFailureEmail
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Effect: Allow
+                Action:
+                  - ses:SendEmail
+                  - ses:SendRawEmail
+                Resource:
+                  - !Sub arn:aws:ses:${AWS::Region}:${AWS::AccountId}:identity/*
 
   # ─── ses-emailer-function ────────────────────────────────────────────────────
 
@@ -156,17 +175,6 @@ Resources:
                 Resource:
                   - !Sub arn:aws:ses:${AWS::Region}:${AWS::AccountId}:identity/${SenderDomain}
                   - !Sub arn:aws:ses:${AWS::Region}:${AWS::AccountId}:identity/*
-        - PolicyName: SQSFailureQueue
-          PolicyDocument:
-            Version: '2012-10-17'
-            Statement:
-              - Effect: Allow
-                Action:
-                  - sqs:ReceiveMessage
-                  - sqs:DeleteMessage
-                  - sqs:GetQueueAttributes
-                Resource: !Sub arn:aws:sqs:${AWS::Region}:${AWS::AccountId}:ses-emailer-failure-queue${Env}
-
   # ─── SES → S3 write role ─────────────────────────────────────────────────────
 
   # Assumed by SES to deliver inbound emails to the SES staging bucket

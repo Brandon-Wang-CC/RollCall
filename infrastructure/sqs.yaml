@@ -9,16 +9,7 @@ Parameters:
 
 Resources:
 
-  # Receives pipeline failure events from rollcall-lambda (and rollcall-dlq handler); triggers ses-emailer
-  SESEmailerFailureQueue:
-    Type: AWS::SQS::Queue
-    Properties:
-      QueueName: !Sub "ses-emailer-failure-queue${Env}"
-      VisibilityTimeout: 300
-      MessageRetentionPeriod: 345600
-      SqsManagedSseEnabled: true
-
-  # Dead-letter queue for CSV-Parser-queue (maxReceiveCount: 3)
+  # Dead-letter queue for CSV-Parser-queue — audit trail for failed runs (no retry)
   CSVParserDLQ:
     Type: AWS::SQS::Queue
     Properties:
@@ -27,7 +18,7 @@ Resources:
       MessageRetentionPeriod: 345600
       SqsManagedSseEnabled: true
 
-  # Dead-letter queue for rollcall-sqs (maxReceiveCount: 3)
+  # Dead-letter queue for rollcall-sqs — audit trail for failed runs (no retry)
   RollCallDLQ:
     Type: AWS::SQS::Queue
     Properties:
@@ -46,7 +37,7 @@ Resources:
       ReceiveMessageWaitTimeSeconds: 20
       RedrivePolicy:
         deadLetterTargetArn: !GetAtt RollCallDLQ.Arn
-        maxReceiveCount: 3
+        maxReceiveCount: 1
       SqsManagedSseEnabled: true
 
   RollCallQueuePolicy:
@@ -85,7 +76,7 @@ Resources:
       MessageRetentionPeriod: 345600
       RedrivePolicy:
         deadLetterTargetArn: !GetAtt CSVParserDLQ.Arn
-        maxReceiveCount: 3
+        maxReceiveCount: 1
       SqsManagedSseEnabled: true
 
   CSVParserQueuePolicy:
@@ -132,8 +123,3 @@ Outputs:
     Value: !GetAtt CSVParserDLQ.Arn
     Export:
       Name: !Sub "csv-parser-dlq-arn${Env}"
-
-  SESEmailerFailureQueueArn:
-    Value: !GetAtt SESEmailerFailureQueue.Arn
-    Export:
-      Name: !Sub "ses-emailer-failure-queue-arn${Env}"

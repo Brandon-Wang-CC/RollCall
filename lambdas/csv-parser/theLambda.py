@@ -15,11 +15,13 @@ from datetime import datetime
 
 s3 = boto3.client("s3")
 sns_client = boto3.client("sns")
+ses_client = boto3.client("ses")
 
 logger = logging.getLogger()
 logger.setLevel(logging.INFO)
 
-CSV_BUCKET = os.environ.get("CSV_BUCKET")
+CSV_BUCKET   = os.environ.get("CSV_BUCKET")
+SENDER_EMAIL = os.environ.get("SENDER_EMAIL")
 NS = {"main": "http://schemas.openxmlformats.org/spreadsheetml/2006/main"}
 
 
@@ -182,48 +184,40 @@ def publish_to_sns(ret_addr: str, subject: str = ""):
         logger.error("Error publishing to SNS: %s", e)
 
 
-def _handle_dlq_event(event):
-    """Triggered by csv-parser-dlq after all SQS retries are exhausted.
-    Publishes a failure event to dataReceived SNS so rollcall-lambda can forward it to ses-emailer."""
-    record = event["Records"][0]
-    sender_email = ""
-    original_subject = ""
+def _send_failure_email(to_email, subject_ref=""):
+    if not to_email or not SENDER_EMAIL:
+        logger.warning("Cannot send failure notification — sender or recipient email not configured")
+        return
     try:
-        outer = json.loads(record["body"])
-        inner = json.loads(outer.get("Message", "{}"))
-        sender_email = inner.get("mail", {}).get("source", "")
-        original_subject = (
-            inner.get("mail", {}).get("commonHeaders", {}).get("subject", "")
+        subject_line = f'Pipeline Error — Unable to Process Submission'
+        body_lines = [
+            "Hello,",
+            "",
+            "We were unable to process your most recent submission.",
+        ]
+        if subject_ref:
+            body_lines.append(f'  Original email:  {subject_ref}')
+        body_lines += [
+            "",
+            "An error occurred while extracting the attached files. No output "
+            "report was generated.",
+            "",
+            "Please check that all required attachments were included and try "
+            "again. If the problem persists, contact your administrator.",
+            "",
+            "— RollCall",
+        ]
+        ses_client.send_email(
+            Source=SENDER_EMAIL,
+            Destination={"ToAddresses": [to_email]},
+            Message={
+                "Subject": {"Data": subject_line},
+                "Body":    {"Text": {"Data": "\n".join(body_lines)}},
+            },
         )
+        logger.info("Failure notification sent to %s", to_email)
     except Exception as e:
-        logger.error("Could not parse DLQ message to extract sender: %s", e)
-
-    failure_event = {
-        "type": "pipeline_failure",
-        "failedIn": os.environ.get("AWS_LAMBDA_FUNCTION_NAME", "csvParser"),
-        "timestamp": datetime.utcnow().strftime("%Y-%m-%dT%H:%M:%SZ"),
-        "error": (
-            "Lambda invocation failed after exhausting all retry attempts. "
-            "See CloudWatch Logs for details."
-        ),
-        "sender": sender_email,
-        "subject": original_subject,
-    }
-
-    topic_arn = os.environ.get("SNS_TOPIC_ARN")
-    try:
-        response = sns_client.publish(
-            TopicArn=topic_arn,
-            Message=json.dumps(failure_event),
-            Subject="Pipeline Failure",
-        )
-        logger.info("Published failure event for sender %s (SNS: %s)", sender_email, response["MessageId"])
-    except Exception as e:
-        logger.error("Could not publish failure event to SNS: %s", e)
-        raise
-
-    return {"status": "failure_event_published", "sender": sender_email}
-
+        logger.error("Could not send failure notification to %s: %s", to_email, e)
 
 
 def _get_object_with_retry(bucket, key, max_retries=3):
@@ -254,11 +248,8 @@ def lambda_handler(event, context):
     start = time.time()
     logger.info(f"Event received: {json.dumps(event, indent=2)}")
 
-    # Route DLQ events to the failure handler instead of normal processing
-    if "dlq" in event["Records"][0].get("eventSourceARN", "").lower():
-        return _handle_dlq_event(event)
-
     sender_email = None
+    email_subject = ""
     try:
         wipe_buckets()
 
@@ -272,7 +263,6 @@ def lambda_handler(event, context):
 
         total_files = 0
         processed_files = []
-        email_subject = ""
 
         for record in event.get("Records", []):
             sns_message = record["body"]
@@ -323,4 +313,5 @@ def lambda_handler(event, context):
 
     except Exception as e:
         logger.error("Unhandled exception: %s", e, exc_info=True)
+        _send_failure_email(sender_email, email_subject)
         raise

@@ -29,6 +29,9 @@ Parameters:
   MD1Name:
     Type: String
     Description: Name and employee ID stamped into the MD-1 column of every output row
+  SenderEmail:
+    Type: String
+    Description: Verified SES email address used to send failure notifications
   Env:
     Type: String
     Default: ""
@@ -57,7 +60,7 @@ Resources:
           FILE_PREFIX_CONTRACTOR_CLOSED: !Ref FilePrefixContractorClosed
           FILE_PREFIX_CANDIDATES: !Ref FilePrefixCandidates
           MD1_NAME: !Ref MD1Name
-          SES_EMAILER_FAILURE_QUEUE_URL: !Sub "https://sqs.${AWS::Region}.amazonaws.com/${AWS::AccountId}/ses-emailer-failure-queue${Env}"
+          SENDER_EMAIL: !Ref SenderEmail
       Architectures:
         - x86_64
       EphemeralStorage:
@@ -70,11 +73,6 @@ Resources:
             BatchSize: 1
             FunctionResponseTypes:
               - ReportBatchItemFailures
-        DLQTrigger:
-          Type: SQS
-          Properties:
-            Queue: !Sub arn:aws:sqs:${AWS::Region}:${AWS::AccountId}:rollcall-dlq-sqs${Env}
-            BatchSize: 1
       LoggingConfig:
         LogFormat: Text
         LogGroup: !Sub /aws/lambda/rollcall-lambda${Env}

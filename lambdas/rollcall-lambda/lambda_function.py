@@ -12,12 +12,12 @@ logger = logging.getLogger()
 logger.setLevel(logging.INFO)
 
 s3   = boto3.client("s3")
-sqs  = boto3.client("sqs")
+ses  = boto3.client("ses")
 
 BUCKET_NAME  = os.environ.get("CSV_BUCKET")
 DEPTS_BUCKET = os.environ.get("DEPTS_BUCKET")
+SENDER_EMAIL = os.environ.get("SENDER_EMAIL")
 TMP_DIR = "/tmp" if os.environ.get("AWS_EXECUTION_ENV") else os.path.join(os.path.dirname(os.path.abspath(__file__)), "tmp")
-SES_EMAILER_FAILURE_QUEUE_URL = os.environ.get("SES_EMAILER_FAILURE_QUEUE_URL")
 
 
 def _decode(val):
@@ -743,51 +743,37 @@ def write_output_workbook(crew_unfilled, crew_filled, contractor_unfilled, contr
 
     return output_path
 
-def _forward_failure_event(failure_event):
-    """Send a pipeline failure event to the ses-emailer failure queue."""
-    sqs.send_message(
-        QueueUrl=SES_EMAILER_FAILURE_QUEUE_URL,
-        MessageBody=json.dumps(failure_event),
-    )
-    logger.info("Forwarded failure event to ses-emailer queue (failedIn: %s, sender: %s)",
-                failure_event.get("failedIn"), failure_event.get("sender"))
-
-
-def _handle_dlq_event(event):
-    """Triggered by rollcall-dlq after all SQS retries are exhausted.
-    Forwards a failure event directly to ses-emailer failure queue."""
-    record = event["Records"][0]
-    failure_event = None
+def _send_failure_email(to_email, subject_ref=""):
+    if not to_email or not SENDER_EMAIL:
+        logger.warning("Cannot send failure notification — sender or recipient email not configured")
+        return
     try:
-        outer = json.loads(record["body"])
-        inner = json.loads(outer.get("Message", "{}"))
-        if inner.get("type") == "pipeline_failure":
-            failure_event = inner  # already a failure event — preserve original failedIn
-        else:
-            failure_event = {
-                "type": "pipeline_failure",
-                "failedIn": os.environ.get("AWS_LAMBDA_FUNCTION_NAME", "rollcall-lambda"),
-                "timestamp": datetime.utcnow().strftime("%Y-%m-%dT%H:%M:%SZ"),
-                "error": (
-                    "Lambda invocation failed after exhausting all retry attempts. "
-                    "See CloudWatch Logs for details."
-                ),
-                "sender": inner.get("retAddr", ""),
-                "subject": inner.get("subject", ""),
-            }
+        body_lines = [
+            "Hello,",
+            "",
+            "Your files were received, but an error occurred while generating "
+            "the reconciliation report.",
+        ]
+        if subject_ref:
+            body_lines.append(f"  Original email:  {subject_ref}")
+        body_lines += [
+            "",
+            "No output report was delivered. Please try resubmitting your "
+            "files. If the problem persists, contact your administrator.",
+            "",
+            "— RollCall",
+        ]
+        ses.send_email(
+            Source=SENDER_EMAIL,
+            Destination={"ToAddresses": [to_email]},
+            Message={
+                "Subject": {"Data": "Pipeline Error — Report Generation Failed"},
+                "Body":    {"Text": {"Data": "\n".join(body_lines)}},
+            },
+        )
+        logger.info("Failure notification sent to %s", to_email)
     except Exception as e:
-        logger.error("Could not parse DLQ message: %s", e)
-        failure_event = {
-            "type": "pipeline_failure",
-            "failedIn": os.environ.get("AWS_LAMBDA_FUNCTION_NAME", "rollcall-lambda"),
-            "timestamp": datetime.utcnow().strftime("%Y-%m-%dT%H:%M:%SZ"),
-            "error": "Pipeline failure — could not parse message details.",
-            "sender": "",
-            "subject": "",
-        }
-
-    _forward_failure_event(failure_event)
-    return {"status": "failure_forwarded"}
+        logger.error("Could not send failure notification to %s: %s", to_email, e)
 
 
 def lambda_handler(event, context):
@@ -795,22 +781,12 @@ def lambda_handler(event, context):
     logger.info("Lambda handler invoked")
     logger.info(f"Event: {json.dumps(event, indent=2)}")
 
-    # Route DLQ events to the failure handler
-    if "dlq" in event["Records"][0].get("eventSourceARN", "").lower():
-        return _handle_dlq_event(event)
-
     ret_addr = None
+    email_subject = ""
     try:
         inner_msg = json.loads(json.loads(event["Records"][0].get("body", "{}")).get("Message", "{}"))
-
-        # Pass pipeline failure events through to ses-emailer without processing
-        if inner_msg.get("type") == "pipeline_failure":
-            logger.info("Received pipeline failure event from %s — forwarding to ses-emailer",
-                        inner_msg.get("failedIn"))
-            _forward_failure_event(inner_msg)
-            return {"status": "failure_forwarded"}
-
         ret_addr = inner_msg.get("retAddr")
+        email_subject = inner_msg.get("subject", "")
         logger.info(f"Return address (output folder): {ret_addr}")
         discovered  = discover_files(BUCKET_NAME)
         local_files = download_all_files(BUCKET_NAME, discovered)
@@ -845,4 +821,5 @@ def lambda_handler(event, context):
 
     except Exception as e:
         logger.error("Unhandled exception: %s", e, exc_info=True)
+        _send_failure_email(ret_addr, email_subject)
         raise

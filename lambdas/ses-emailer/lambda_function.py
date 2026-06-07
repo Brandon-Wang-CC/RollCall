@@ -16,81 +16,6 @@ logger = logging.getLogger()
 logger.setLevel(logging.INFO)
 
 
-def _notify_failure(to_email, error_msg):
-    if not to_email:
-        logger.warning("Cannot send failure notification — recipient email not yet known")
-        return
-    try:
-        ses.send_email(
-            Source=os.environ.get("SENDER_EMAIL", ""),
-            Destination={"ToAddresses": [to_email]},
-            Message={
-                "Subject": {"Data": "RollCall pipeline error"},
-                "Body": {"Text": {"Data": (
-                    f"Your RollCall pipeline run failed in ses-emailer.\n\n"
-                    f"Error: {error_msg}\n\n"
-                    f"Check CloudWatch logs (/aws/lambda/ses-emailer-function) for full details."
-                )}},
-            },
-        )
-        logger.info("Failure notification sent to %s", to_email)
-    except Exception as e:
-        logger.error("Could not send failure notification to %s: %s", to_email, e)
-
-
-def _handle_failure_event(record):
-    """Receive a pipeline failure event from SQS and send a polite failure email to the original sender."""
-    try:
-        failure_event = json.loads(record["body"])
-    except Exception as e:
-        logger.error("Could not parse failure event body: %s", e)
-        raise
-
-    sender      = failure_event.get("sender", "")
-    failed_in   = failure_event.get("failedIn", "unknown")
-    timestamp   = failure_event.get("timestamp", "")
-    error       = failure_event.get("error", "An unexpected error occurred.")
-    orig_subject = failure_event.get("subject", "")
-
-    if not sender:
-        logger.warning("No sender email in failure event — skipping notification")
-        return {"statusCode": 200, "body": json.dumps({"skipped": "no sender"})}
-
-    subject_ref = f'"{orig_subject}"' if orig_subject else "your pipeline run"
-    subject_line = f"RollCall Pipeline Error — {subject_ref}"
-
-    body_lines = [
-        "Hello,",
-        "",
-        f"Unfortunately, {subject_ref} could not be completed.",
-        "",
-        "Details:",
-    ]
-    if orig_subject:
-        body_lines.append(f"  Original email:  {orig_subject}")
-    body_lines += [
-        f"  Failed in:       {failed_in}",
-        f"  Time:            {timestamp}",
-        f"  Details:         {error}",
-        "",
-        "If this continues, please contact your administrator.",
-        "",
-        "— RollCall",
-    ]
-
-    logger.info("Sending failure notification to %s (failedIn: %s)", sender, failed_in)
-    ses.send_email(
-        Source=os.environ.get("SENDER_EMAIL", ""),
-        Destination={"ToAddresses": [sender]},
-        Message={
-            "Subject": {"Data": subject_line},
-            "Body":    {"Text": {"Data": "\n".join(body_lines)}},
-        },
-    )
-    logger.info("Failure notification sent to %s", sender)
-    return {"statusCode": 200, "body": json.dumps({"notified": sender, "failedIn": failed_in})}
-
-
 def parse_event(event):
     record = event["Records"][0]
     body = record.get("body")
@@ -105,11 +30,14 @@ def download_file_from_s3(bucket, key, local_path="/tmp/report.xlsx"):
     return local_path
 
 
-def send_email_with_attachment(to_email, subject, body, file_path, filename=None):
+def send_email_with_attachment(to_email, subject, body, file_path, filename=None, in_reply_to=None, references=None):
     msg = MIMEMultipart()
     msg["Subject"] = subject
     msg["From"] = os.environ.get("SENDER_EMAIL")
     msg["To"] = to_email
+    if in_reply_to:
+        msg["In-Reply-To"] = in_reply_to
+        msg["References"] = references or in_reply_to
 
     msg.attach(MIMEText(body, "plain"))
 
@@ -138,55 +66,62 @@ def lambda_handler(event, context):
 
     record = event["Records"][0]
 
-    # SQS failure queue → send failure notification email (no recursive _notify_failure)
-    if record.get("eventSource") == "aws:sqs":
-        return _handle_failure_event(record)
+    bucket = record["s3"]["bucket"]["name"]
+    key = record["s3"]["object"]["key"]
 
-    to_email = None
-    try:
-        bucket = record["s3"]["bucket"]["name"]
-        key = record["s3"]["object"]["key"]
+    # S3 event notifications encode special chars (e.g. @ → %40) in object keys
+    key = urllib.parse.unquote_plus(key)
 
-        # S3 event notifications encode special chars (e.g. @ → %40) in object keys
-        key = urllib.parse.unquote_plus(key)
+    if "/" not in key:
+        logger.info(f"Skipping non-output key (no email prefix): {key}")
+        return {"statusCode": 200, "body": json.dumps({"skipped": key})}
 
-        if "/" not in key:
-            logger.info(f"Skipping non-output key (no email prefix): {key}")
-            return {"statusCode": 200, "body": json.dumps({"skipped": key})}
+    to_email = key.split("/")[0]
+    file_key = key.split("/")[1]
 
-        to_email = key.split("/")[0]
-        file_key = key.split("/")[1]
+    logger.info(f"Recipient: {to_email} | File: {file_key} | Source: s3://{bucket}/{key}")
 
-        logger.info(f"Recipient: {to_email} | File: {file_key} | Source: s3://{bucket}/{key}")
+    head = s3.head_object(Bucket=bucket, Key=key)
+    obj_meta        = head.get("Metadata", {})
+    orig_message_id = obj_meta.get("original-message-id", "")
+    orig_subject    = obj_meta.get("original-subject", "")
 
-        subject = "Pipeline Complete"
-        body = "See attached file."
+    if orig_subject:
+        prefix = "RE: " if not orig_subject.upper().startswith("RE:") else ""
+        subject = f"{prefix}{orig_subject}"
+    else:
+        subject = "Headcount Reconciliation Complete"
 
-        timestamp = datetime.now().strftime("%B %-d %Y %-I-%M %p")
-        attachment_name = f"ESF WF data file {timestamp}.xlsx"
+    body = (
+        "Please find your updated ES&F headcount reconciliation workbook attached.\n\n"
+        "This report was generated automatically from the files included in your "
+        "most recent submission. It consolidates open and filled requisitions across "
+        "crew and contractor categories, and carries forward any positions from the "
+        "previous reporting period that are no longer present in the current reports.\n\n"
+        "No action is required unless corrections are needed."
+    )
 
-        local_file = download_file_from_s3(bucket, key)
-        response = send_email_with_attachment(
-            to_email=to_email,
-            subject=subject,
-            body=body,
-            file_path=local_file,
-            filename=attachment_name,
-        )
-        elapsed = time.time() - start
-        logger.info(f"Email sent to {to_email} | SES MessageId: {response['MessageId']} | elapsed: {elapsed:.2f}s")
+    timestamp = datetime.now().strftime("%B %-d %Y %-I-%M %p")
+    attachment_name = f"ESF WF data file {timestamp}.xlsx"
 
-        return {
-            "statusCode": 200,
-            "body": json.dumps({
-                "message": "Email sent successfully",
-                "to": to_email,
-                "s3": f"s3://{bucket}/{key}",
-                "sesMessageId": response["MessageId"]
-            })
-        }
+    local_file = download_file_from_s3(bucket, key)
+    response = send_email_with_attachment(
+        to_email=to_email,
+        subject=subject,
+        body=body,
+        file_path=local_file,
+        filename=attachment_name,
+        in_reply_to=orig_message_id or None,
+    )
+    elapsed = time.time() - start
+    logger.info(f"Email sent to {to_email} | SES MessageId: {response['MessageId']} | elapsed: {elapsed:.2f}s")
 
-    except Exception as e:
-        logger.error("Unhandled exception: %s", e, exc_info=True)
-        _notify_failure(to_email, str(e))
-        raise
+    return {
+        "statusCode": 200,
+        "body": json.dumps({
+            "message": "Email sent successfully",
+            "to": to_email,
+            "s3": f"s3://{bucket}/{key}",
+            "sesMessageId": response["MessageId"]
+        })
+    }

@@ -9,7 +9,7 @@ Parameters:
 
 Resources:
 
-  # Fires when csvParser has exhausted all 3 SQS retries (>= 5 errors in a 5-minute window)
+  # Fires when csvParser accumulates >= 3 errors in a 24-hour window
   CSVParserErrorAlarm:
     Type: AWS::CloudWatch::Alarm
     Properties:
@@ -23,12 +23,12 @@ Resources:
       Dimensions:
         - Name: FunctionName
           Value: !Sub "csvParser${Env}"
-      Period: 300
+      Period: 86400
       EvaluationPeriods: 1
-      Threshold: 5
+      Threshold: 3
       ComparisonOperator: GreaterThanOrEqualToThreshold
 
-  # Fires when rollcall-lambda has exhausted all 3 SQS retries (>= 5 errors in a 5-minute window)
+  # Fires when rollcall-lambda accumulates >= 3 errors in a 24-hour window
   RollCallLambdaErrorAlarm:
     Type: AWS::CloudWatch::Alarm
     Properties:
@@ -42,7 +42,7 @@ Resources:
       Dimensions:
         - Name: FunctionName
           Value: !Sub "rollcall-lambda${Env}"
-      Period: 300
+      Period: 86400
       EvaluationPeriods: 1
-      Threshold: 5
+      Threshold: 3
       ComparisonOperator: GreaterThanOrEqualToThreshold

@@ -10,6 +10,9 @@ Parameters:
   CsvBucket:
     Type: String
     Description: S3 bucket to write processed XLSX attachments to
+  SenderEmail:
+    Type: String
+    Description: Verified SES email address used to send failure notifications
   Env:
     Type: String
     Default: ""
@@ -33,6 +36,7 @@ Resources:
         Variables:
           SNS_TOPIC_ARN: !Sub arn:aws:sns:${AWS::Region}:${AWS::AccountId}:dataReceived${Env}
           CSV_BUCKET: !Ref CsvBucket
+          SENDER_EMAIL: !Ref SenderEmail
       Architectures:
         - x86_64
       EphemeralStorage:
@@ -45,11 +49,6 @@ Resources:
             BatchSize: 1
             FunctionResponseTypes:
               - ReportBatchItemFailures
-        DLQTrigger:
-          Type: SQS
-          Properties:
-            Queue: !Sub arn:aws:sqs:${AWS::Region}:${AWS::AccountId}:csv-parser-dlq${Env}
-            BatchSize: 1
       LoggingConfig:
         LogFormat: Text
         LogGroup: !Sub /aws/lambda/csvParser${Env}

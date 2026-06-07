@@ -38,12 +38,6 @@ Resources:
         - x86_64
       EphemeralStorage:
         Size: 1024
-      Events:
-        FailureQueueTrigger:
-          Type: SQS
-          Properties:
-            Queue: !Sub arn:aws:sqs:${AWS::Region}:${AWS::AccountId}:ses-emailer-failure-queue${Env}
-            BatchSize: 1
       LoggingConfig:
         LogFormat: Text
         LogGroup: !Sub /aws/lambda/ses-emailer-function${Env}
