@@ -16,6 +16,7 @@ RollCall is an automated headcount reconciliation pipeline. When a trigger email
 - [ ] Fill in `user-settings.yaml`
 - [ ] Fill in `.github/deploy-config.yaml`
 - [ ] Set the alarm contact email in `.github/CODEOWNERS`
+- [ ] Seed `reference-data/ESF WF data file ref.xlsx` with your most recent output workbook (Step 1)
 - [ ] Have your AWS team complete the GitHub Actions access setup (Step 2)
 - [ ] Run the Deploy workflow (Step 3)
 - [ ] Have your DNS team add the SES records for the pipeline subdomain (Step 4)
@@ -53,6 +54,17 @@ Stack names under `stacks` can be left as-is unless they conflict with existing 
 ### `.github/CODEOWNERS`
 
 Replace the placeholder email with the address that should receive CloudWatch alarm notifications if a Lambda error occurs during a pipeline run. This is typically an operations or on-call contact. The same address is also set as the GitHub code owner for the repository, so it will receive pull request review requests.
+
+### `reference-data/` — Seed the output workbook
+
+The `reference-data/` folder is synced to `DeptsBucket` during every deploy. It contains the lookup files the pipeline reads at runtime (`cc_id.csv`, `depts.csv`, `status.csv`) and the reference workbook `ESF WF data file ref.xlsx`.
+
+**Before your first deploy, replace `reference-data/ESF WF data file ref.xlsx` with your most recent version of the output workbook.** The pipeline uses this file in two ways:
+
+1. **Lookup data** — the `Reqs` and `ALL` sheets are read each run to determine whether requisitions are new or existing.
+2. **First-run seed** — on fresh deploy, before the pipeline has produced any output of its own, it reads the `Reqs` sheet from this file to populate the carry-forward tracking. Without a current seed, requisitions present in your most recent report will appear as new on the first run.
+
+After the first pipeline run completes, the carry-forward state is maintained automatically in `DeptsBucket` and this file is no longer used as a seed. Subsequent deploys re-upload it but the pipeline's live reference takes precedence.
 
 ---
 

@@ -636,6 +636,9 @@ def build_contractor_filled(filtered, ref):
 
 OUTPUT_FILE = "ESF WF data file.xlsx"
 OUTPUT_KEY  = "ESF WF data file.xlsx"
+# .ref extension prevents the S3 ObjectCreated trigger (filtered on suffix ".xlsx") from
+# firing ses-emailer when rollcall-lambda refreshes the pipeline-internal reference copy.
+REF_KEY     = "ESF WF data file.ref"
 
 # Master column order for the combined output
 MASTER_COLUMNS = [
@@ -685,7 +688,7 @@ def write_output_workbook(crew_unfilled, crew_filled, contractor_unfilled, contr
     # Step 1 — load previous run from S3
     try:
         logger.info("Loading previous ESF WF data file from S3...")
-        response = s3.get_object(Bucket=DEPTS_BUCKET, Key=OUTPUT_KEY)
+        response = s3.get_object(Bucket=DEPTS_BUCKET, Key=REF_KEY)
         esf_bytes = io.BytesIO(response["Body"].read())
         
         # Check which sheet exists — first run will have "Reqs", subsequent runs "Output"
@@ -703,8 +706,22 @@ def write_output_workbook(crew_unfilled, crew_filled, contractor_unfilled, contr
         prev_df["Req #"] = prev_df["Req #"].astype(str).str.strip()
         logger.info(f"Loaded {len(prev_df)} rows from previous run")
     except s3.exceptions.NoSuchKey:
-        logger.info("No previous file found in S3 — starting fresh")
-        prev_df = pd.DataFrame(columns=MASTER_COLUMNS)
+        # Fresh deploy — bootstrap from the static ref file (Reqs sheet) if it exists
+        try:
+            logger.info("No reference file found — bootstrapping from %s", ESF_WF_FILE)
+            response = s3.get_object(Bucket=DEPTS_BUCKET, Key=ESF_WF_FILE)
+            esf_bytes = io.BytesIO(response["Body"].read())
+            xl = pd.ExcelFile(esf_bytes)
+            if "Reqs" in xl.sheet_names:
+                prev_df = pd.read_excel(xl, sheet_name="Reqs")
+                prev_df["Req #"] = prev_df["Req #"].astype(str).str.strip()
+                logger.info("Bootstrapped %d rows from %s Reqs sheet", len(prev_df), ESF_WF_FILE)
+            else:
+                logger.info("No Reqs sheet in bootstrap file — starting fresh")
+                prev_df = pd.DataFrame(columns=MASTER_COLUMNS)
+        except s3.exceptions.NoSuchKey:
+            logger.info("No bootstrap file found — starting fresh")
+            prev_df = pd.DataFrame(columns=MASTER_COLUMNS)
 
     # Step 2 — standardize and combine new data
     new_df = pd.concat([
@@ -738,6 +755,9 @@ def write_output_workbook(crew_unfilled, crew_filled, contractor_unfilled, contr
     key = f"{ret_addr}/{OUTPUT_KEY}"
     s3.upload_file(output_path, DEPTS_BUCKET, key)
     logger.info(f"Uploaded output to s3://{DEPTS_BUCKET}/{key}")
+
+    s3.upload_file(output_path, DEPTS_BUCKET, REF_KEY)
+    logger.info(f"Updated reference copy at s3://{DEPTS_BUCKET}/{REF_KEY}")
 
     return output_path
 
