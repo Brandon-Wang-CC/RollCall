@@ -23,7 +23,7 @@ Resources:
     Type: AWS::SQS::Queue
     Properties:
       QueueName: !Sub "csv-parser-dlq${Env}"
-      VisibilityTimeout: 30
+      VisibilityTimeout: 360
       MessageRetentionPeriod: 345600
       SqsManagedSseEnabled: true
 
@@ -32,7 +32,7 @@ Resources:
     Type: AWS::SQS::Queue
     Properties:
       QueueName: !Sub "rollcall-dlq-sqs${Env}"
-      VisibilityTimeout: 30
+      VisibilityTimeout: 360
       MessageRetentionPeriod: 345600
       SqsManagedSseEnabled: true
 
