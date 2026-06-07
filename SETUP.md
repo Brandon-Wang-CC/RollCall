@@ -155,6 +155,17 @@ If still in sandbox:
 
 **Reference:** [AWS SES: Request production access](https://docs.aws.amazon.com/ses/latest/dg/request-production-access.html)
 
+### Testing while still in sandbox
+
+While the account is in sandbox, the pipeline can only send the output email to addresses that are verified in SES. To test end-to-end before production access is granted:
+
+1. Open **SES console → Verified identities → Create identity**
+2. Choose **Email address**, enter the address you'll send the trigger email from, and click **Create identity**
+3. Click the confirmation link in the email AWS sends to that address
+4. Once verified, trigger the pipeline by sending an email from that address — the output workbook will be delivered back to it
+
+Each tester's address must be verified individually until production access is granted. Once out of sandbox, any recipient can receive pipeline output without this step.
+
 ---
 
 ## Step 6 — Test the Pipeline
@@ -184,8 +195,8 @@ Check that the SNS and SQS stacks deployed successfully and that the SES receipt
 **rollcall-lambda fails with `FileNotFoundError`**
 The expected XLSX attachments were not found in the CSV bucket. Check csvParser's CloudWatch logs to confirm extraction succeeded. The pipeline expects files with specific name prefixes.
 
-**ses-emailer fails with `MessageRejected`**
-The account is still in SES sandbox (Step 5 not complete), or the subdomain is not yet verified (DNS records from Step 4 not yet propagated). Check **SES console → Verified identities** for the subdomain's verification status.
+**ses-emailer fails with `MessageRejected` or `AccessDenied` on a recipient identity**
+The account is still in SES sandbox (Step 5 not complete). In sandbox mode, SES can only send to verified email addresses, and it enforces IAM authorization checks on verified recipient identities. Verify the recipient address in the SES console (see "Testing while still in sandbox" above), or complete Step 5 to exit sandbox. If the error is instead about the subdomain sender, check **SES console → Verified identities** for the subdomain's verification status (DNS records from Step 4 may not have propagated yet).
 
 **Alarm emails are not being received**
 The SNS subscription confirmation was not completed. Open the **SNS console → Topics**, find `Lambda1_Error_Notif` or `Lambda2_Error_Notif`, click **Subscriptions**, and check the status. If it shows `PendingConfirmation`, use **Request confirmation** to resend the email.
