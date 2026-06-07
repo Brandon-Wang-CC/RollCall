@@ -50,7 +50,7 @@ def make_raw_email_bytes(attachments=None):
     """
     msg = MIMEMultipart()
     msg["From"] = "sender@example.com"
-    msg["To"] = "pipeline@vg-rollcall.com"
+    msg["To"] = "pipeline@example.com"
     msg["Subject"] = "Report"
     for filename, content in (attachments or []):
         part = MIMEApplication(content, _subtype="xlsx")
@@ -76,7 +76,7 @@ def make_rollcall_event(ret_addr="sender@example.com"):
     return {"Records": [{"body": json.dumps({"Message": inner})}]}
 
 
-def make_ses_emailer_event(key="sender%40example.com/ESF+WF+data+file.xlsx",
+def make_ses_emailer_event(key="sender%40example.com/report+output+file.xlsx",
                            bucket="test-depts-bucket"):
     """S3 ObjectCreated event that triggers ses-emailer."""
     return {"Records": [{"s3": {"bucket": {"name": bucket}, "object": {"key": key}}}]}
