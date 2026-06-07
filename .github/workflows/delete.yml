@@ -10,7 +10,7 @@ on:
         required: true
         type: choice
         options:
-          - eng
+          - test
           - prod
 
 permissions:
@@ -79,7 +79,7 @@ jobs:
 
     env:
       AWS_REGION:        ${{ needs.load-config.outputs.aws-region }}
-      # Every environment gets its name as a suffix: eng → -eng, prod → -prod.
+      # Every environment gets its name as a suffix: test → -test, prod → -prod.
       ENV_SUFFIX:        -${{ inputs.env }}
       CSV_BUCKET:        ${{ needs.load-config.outputs.csv-bucket }}-${{ inputs.env }}
       DEPTS_BUCKET:      ${{ needs.load-config.outputs.depts-bucket }}-${{ inputs.env }}

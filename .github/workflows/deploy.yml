@@ -1,6 +1,6 @@
 name: Deploy
 
-run-name: Deploy → ${{ inputs.env || 'eng' }}
+run-name: Deploy → ${{ inputs.env || 'test' }}
 
 on:
   workflow_dispatch:
@@ -10,7 +10,7 @@ on:
         required: true
         type: choice
         options:
-          - eng
+          - test
           - prod
   workflow_run:
     workflows: ["Build"]
@@ -20,7 +20,7 @@ on:
       - main
 
 concurrency:
-  group: deploy-${{ inputs.env || 'eng' }}
+  group: deploy-${{ inputs.env || 'test' }}
   cancel-in-progress: false
 
 permissions:
@@ -121,23 +121,23 @@ jobs:
 
     env:
       AWS_REGION:        ${{ needs.load-config.outputs.aws-region }}
-      # Every environment gets its name as a suffix: eng → -eng, prod → -prod.
+      # Every environment gets its name as a suffix: test → -test, prod → -prod.
       # This keeps all CloudFormation stacks and AWS resources fully isolated.
-      ENV_SUFFIX:        -${{ inputs.env || 'eng' }}
-      CSV_BUCKET:        ${{ needs.load-config.outputs.csv-bucket }}-${{ inputs.env || 'eng' }}
-      DEPTS_BUCKET:      ${{ needs.load-config.outputs.depts-bucket }}-${{ inputs.env || 'eng' }}
-      SES_BUCKET:        ${{ needs.load-config.outputs.ses-bucket }}-${{ inputs.env || 'eng' }}
+      ENV_SUFFIX:        -${{ inputs.env || 'test' }}
+      CSV_BUCKET:        ${{ needs.load-config.outputs.csv-bucket }}-${{ inputs.env || 'test' }}
+      DEPTS_BUCKET:      ${{ needs.load-config.outputs.depts-bucket }}-${{ inputs.env || 'test' }}
+      SES_BUCKET:        ${{ needs.load-config.outputs.ses-bucket }}-${{ inputs.env || 'test' }}
       SENDER_DOMAIN:     ${{ needs.load-config.outputs.sender-domain }}
       SENDER_EMAIL:      ${{ needs.load-config.outputs.sender-email }}
-      STACK_IAM:         ${{ needs.load-config.outputs.stack-iam }}-${{ inputs.env || 'eng' }}
-      STACK_S3:          ${{ needs.load-config.outputs.stack-s3 }}-${{ inputs.env || 'eng' }}
-      STACK_SNS:         ${{ needs.load-config.outputs.stack-sns }}-${{ inputs.env || 'eng' }}
-      STACK_SQS:         ${{ needs.load-config.outputs.stack-sqs }}-${{ inputs.env || 'eng' }}
-      STACK_SES:         ${{ needs.load-config.outputs.stack-ses }}-${{ inputs.env || 'eng' }}
-      STACK_CLOUDWATCH:  ${{ needs.load-config.outputs.stack-cloudwatch }}-${{ inputs.env || 'eng' }}
-      STACK_CSV_PARSER:  ${{ needs.load-config.outputs.stack-csv-parser }}-${{ inputs.env || 'eng' }}
-      STACK_ROLLCALL:    ${{ needs.load-config.outputs.stack-rollcall }}-${{ inputs.env || 'eng' }}
-      STACK_SES_EMAILER: ${{ needs.load-config.outputs.stack-ses-emailer }}-${{ inputs.env || 'eng' }}
+      STACK_IAM:         ${{ needs.load-config.outputs.stack-iam }}-${{ inputs.env || 'test' }}
+      STACK_S3:          ${{ needs.load-config.outputs.stack-s3 }}-${{ inputs.env || 'test' }}
+      STACK_SNS:         ${{ needs.load-config.outputs.stack-sns }}-${{ inputs.env || 'test' }}
+      STACK_SQS:         ${{ needs.load-config.outputs.stack-sqs }}-${{ inputs.env || 'test' }}
+      STACK_SES:         ${{ needs.load-config.outputs.stack-ses }}-${{ inputs.env || 'test' }}
+      STACK_CLOUDWATCH:  ${{ needs.load-config.outputs.stack-cloudwatch }}-${{ inputs.env || 'test' }}
+      STACK_CSV_PARSER:  ${{ needs.load-config.outputs.stack-csv-parser }}-${{ inputs.env || 'test' }}
+      STACK_ROLLCALL:    ${{ needs.load-config.outputs.stack-rollcall }}-${{ inputs.env || 'test' }}
+      STACK_SES_EMAILER: ${{ needs.load-config.outputs.stack-ses-emailer }}-${{ inputs.env || 'test' }}
       FILE_PREFIX_UNFILLED:           ${{ needs.load-config.outputs.file-prefix-unfilled }}
       FILE_PREFIX_CONTRACTOR_OPEN:    ${{ needs.load-config.outputs.file-prefix-contractor-open }}
       FILE_PREFIX_CONTRACTOR_CLOSED:  ${{ needs.load-config.outputs.file-prefix-contractor-closed }}
@@ -341,9 +341,9 @@ jobs:
 
       # ── Post-deploy ───────────────────────────────────────────────────────────
 
-      # NOTE: This step only runs for prod. For non-prod environments (eng, test),
+      # NOTE: This step only runs for prod. For non-prod environments (test),
       # the rule set is deployed but NOT activated — SES only allows one active rule
-      # set at a time, so activating eng/test would take prod offline.
+      # set at a time, so activating test would take prod offline.
       # To test a non-prod pipeline, manually activate its rule set:
       #   aws ses set-active-receipt-rule-set --rule-set-name DeliverToS3-<env> --region <region>
       # Remember to reactivate prod (DeliverToS3) when done.
