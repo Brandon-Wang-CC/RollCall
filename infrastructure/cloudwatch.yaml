@@ -14,6 +14,11 @@ Resources:
     Type: AWS::CloudWatch::Alarm
     Properties:
       AlarmName: !Sub "Lambda1_Errors${Env}"
+      AlarmDescription: !Sub >-
+        csvParser${Env} has logged 3 or more errors in the past 24 hours.
+        Failed messages are held in the dead-letter queue: csv-parser-dlq${Env}.
+        Review them in the SQS console:
+        https://console.aws.amazon.com/sqs/v3/home?region=${AWS::Region}#/queues/https%3A%2F%2Fsqs.${AWS::Region}.amazonaws.com%2F${AWS::AccountId}%2Fcsv-parser-dlq${Env}
       ActionsEnabled: true
       AlarmActions:
         - !Sub arn:aws:sns:${AWS::Region}:${AWS::AccountId}:Lambda1_Error_Notif${Env}
@@ -33,6 +38,11 @@ Resources:
     Type: AWS::CloudWatch::Alarm
     Properties:
       AlarmName: !Sub "Lambda2_Errors${Env}"
+      AlarmDescription: !Sub >-
+        rollcall-lambda${Env} has logged 3 or more errors in the past 24 hours.
+        Failed messages are held in the dead-letter queue: rollcall-dlq-sqs${Env}.
+        Review them in the SQS console:
+        https://console.aws.amazon.com/sqs/v3/home?region=${AWS::Region}#/queues/https%3A%2F%2Fsqs.${AWS::Region}.amazonaws.com%2F${AWS::AccountId}%2Frollcall-dlq-sqs${Env}
       ActionsEnabled: true
       AlarmActions:
         - !Sub arn:aws:sns:${AWS::Region}:${AWS::AccountId}:Lambda2_Error_Notif${Env}
