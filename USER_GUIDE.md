@@ -127,6 +127,18 @@ The `reference-data/` folder is synced to `DeptsBucket` on every deploy. It cont
 
 After the first pipeline run completes, the pipeline writes a live reference file to `DeptsBucket` and uses that going forward. The seed file is still re-uploaded on each subsequent deploy, but the live reference always takes precedence.
 
+**Ongoing maintenance — keep reference files current**
+
+The lookup files in `reference-data/` reflect your organization's structure at the time they were created. As the business changes, they will drift out of date and cause silent gaps in the output (missing departments, wrong MD-2 assignments, unrecognized cost centers). Update and commit the relevant file whenever the corresponding thing changes in the org:
+
+| File | Update when… |
+|------|-------------|
+| `cc_id.csv` | A new cost center is created, or an existing one changes subdivision |
+| `depts.csv` | A department is renamed, restructured, or assigned a new MD-2 |
+| `status.csv` | A new candidate status is added in Workday, or a short-status label changes |
+
+After editing, commit and push — the next deploy will sync the updated files to `DeptsBucket` automatically.
+
 ---
 
 ### Step 2 — GitHub Actions AWS Access (AWS Team Task)
