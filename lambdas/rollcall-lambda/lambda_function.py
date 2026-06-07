@@ -33,6 +33,22 @@ FILE_PREFIXES = {
 
 MD1_NAME = _decode(os.environ.get("MD1_NAME"))
 
+_US_STATES = {
+    "AL": "Alabama", "AK": "Alaska", "AZ": "Arizona", "AR": "Arkansas",
+    "CA": "California", "CO": "Colorado", "CT": "Connecticut", "DE": "Delaware",
+    "FL": "Florida", "GA": "Georgia", "HI": "Hawaii", "ID": "Idaho",
+    "IL": "Illinois", "IN": "Indiana", "IA": "Iowa", "KS": "Kansas",
+    "KY": "Kentucky", "LA": "Louisiana", "ME": "Maine", "MD": "Maryland",
+    "MA": "Massachusetts", "MI": "Michigan", "MN": "Minnesota", "MS": "Mississippi",
+    "MO": "Missouri", "MT": "Montana", "NE": "Nebraska", "NV": "Nevada",
+    "NH": "New Hampshire", "NJ": "New Jersey", "NM": "New Mexico", "NY": "New York",
+    "NC": "North Carolina", "ND": "North Dakota", "OH": "Ohio", "OK": "Oklahoma",
+    "OR": "Oregon", "PA": "Pennsylvania", "RI": "Rhode Island", "SC": "South Carolina",
+    "SD": "South Dakota", "TN": "Tennessee", "TX": "Texas", "UT": "Utah",
+    "VT": "Vermont", "VA": "Virginia", "WA": "Washington", "WV": "West Virginia",
+    "WI": "Wisconsin", "WY": "Wyoming", "DC": "District of Columbia",
+}
+
 FILTER_CONFIG = {
     "unfilled": {
         "sheet":          "Sheet1",
@@ -483,7 +499,7 @@ def build_contractor_unfilled(filtered, ref):
                 existing_v_new = "Filled" if esf_hire_val and esf_hire_val.lower() != "nan" else "Open"
 
             loc = str(row.get("LOC", "")).strip()
-            state = {"PA": "Pennsylvania", "TX": "Texas"}.get(loc, loc)
+            state = _US_STATES.get(loc, loc)
 
             report_status = row.get("Status (Please Make a Selection from List)", "")
             short_status = status_map.get(str(report_status), "")
@@ -634,7 +650,7 @@ def build_contractor_filled(filtered, ref):
         short_status      = status_map.get(str(contractor_status), "")
 
         loc   = str(row.get("LOC", "")).strip()
-        state = {"PA": "Pennsylvania", "TX": "Texas"}.get(loc, loc)
+        state = _US_STATES.get(loc, loc)
 
         rows.append({
             "Existing v New":                              "Filled",
