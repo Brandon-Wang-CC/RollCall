@@ -79,20 +79,20 @@ jobs:
 
     env:
       AWS_REGION:        ${{ needs.load-config.outputs.aws-region }}
-      # Mirrors deploy: prod gets no suffix, all other envs get -<env>
-      ENV_SUFFIX:        ${{ inputs.env != 'prod' && format('-{0}', inputs.env) || '' }}
-      CSV_BUCKET:        ${{ needs.load-config.outputs.csv-bucket }}${{ inputs.env != 'prod' && format('-{0}', inputs.env) || '' }}
-      DEPTS_BUCKET:      ${{ needs.load-config.outputs.depts-bucket }}${{ inputs.env != 'prod' && format('-{0}', inputs.env) || '' }}
-      SES_BUCKET:        ${{ needs.load-config.outputs.ses-bucket }}${{ inputs.env != 'prod' && format('-{0}', inputs.env) || '' }}
-      STACK_IAM:         ${{ needs.load-config.outputs.stack-iam }}${{ inputs.env != 'prod' && format('-{0}', inputs.env) || '' }}
-      STACK_S3:          ${{ needs.load-config.outputs.stack-s3 }}${{ inputs.env != 'prod' && format('-{0}', inputs.env) || '' }}
-      STACK_SNS:         ${{ needs.load-config.outputs.stack-sns }}${{ inputs.env != 'prod' && format('-{0}', inputs.env) || '' }}
-      STACK_SQS:         ${{ needs.load-config.outputs.stack-sqs }}${{ inputs.env != 'prod' && format('-{0}', inputs.env) || '' }}
-      STACK_SES:         ${{ needs.load-config.outputs.stack-ses }}${{ inputs.env != 'prod' && format('-{0}', inputs.env) || '' }}
-      STACK_CLOUDWATCH:  ${{ needs.load-config.outputs.stack-cloudwatch }}${{ inputs.env != 'prod' && format('-{0}', inputs.env) || '' }}
-      STACK_CSV_PARSER:  ${{ needs.load-config.outputs.stack-csv-parser }}${{ inputs.env != 'prod' && format('-{0}', inputs.env) || '' }}
-      STACK_ROLLCALL:    ${{ needs.load-config.outputs.stack-rollcall }}${{ inputs.env != 'prod' && format('-{0}', inputs.env) || '' }}
-      STACK_SES_EMAILER: ${{ needs.load-config.outputs.stack-ses-emailer }}${{ inputs.env != 'prod' && format('-{0}', inputs.env) || '' }}
+      # Every environment gets its name as a suffix: eng → -eng, prod → -prod.
+      ENV_SUFFIX:        -${{ inputs.env }}
+      CSV_BUCKET:        ${{ needs.load-config.outputs.csv-bucket }}-${{ inputs.env }}
+      DEPTS_BUCKET:      ${{ needs.load-config.outputs.depts-bucket }}-${{ inputs.env }}
+      SES_BUCKET:        ${{ needs.load-config.outputs.ses-bucket }}-${{ inputs.env }}
+      STACK_IAM:         ${{ needs.load-config.outputs.stack-iam }}-${{ inputs.env }}
+      STACK_S3:          ${{ needs.load-config.outputs.stack-s3 }}-${{ inputs.env }}
+      STACK_SNS:         ${{ needs.load-config.outputs.stack-sns }}-${{ inputs.env }}
+      STACK_SQS:         ${{ needs.load-config.outputs.stack-sqs }}-${{ inputs.env }}
+      STACK_SES:         ${{ needs.load-config.outputs.stack-ses }}-${{ inputs.env }}
+      STACK_CLOUDWATCH:  ${{ needs.load-config.outputs.stack-cloudwatch }}-${{ inputs.env }}
+      STACK_CSV_PARSER:  ${{ needs.load-config.outputs.stack-csv-parser }}-${{ inputs.env }}
+      STACK_ROLLCALL:    ${{ needs.load-config.outputs.stack-rollcall }}-${{ inputs.env }}
+      STACK_SES_EMAILER: ${{ needs.load-config.outputs.stack-ses-emailer }}-${{ inputs.env }}
 
     steps:
       - uses: actions/checkout@v4
