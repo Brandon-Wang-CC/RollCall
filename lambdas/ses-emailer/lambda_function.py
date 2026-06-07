@@ -36,10 +36,8 @@ def send_email_with_attachment(to_email, subject, body, file_path, filename=None
     msg["From"] = os.environ.get("SENDER_EMAIL")
     msg["To"] = to_email
 
-    # Body
     msg.attach(MIMEText(body, "plain"))
 
-    # Attachment
     with open(file_path, "rb") as f:
         part = MIMEApplication(f.read(), _subtype="vnd.openxmlformats-officedocument.spreadsheetml.sheet")
 
@@ -65,11 +63,10 @@ def lambda_handler(event, context):
 
     record = event["Records"][0]
 
-    # S3 bucket + key
     bucket = record["s3"]["bucket"]["name"]
     key = record["s3"]["object"]["key"]
 
-    # S3 URL encoding fix
+    # S3 event notifications encode special chars (e.g. @ → %40) in object keys
     key = urllib.parse.unquote_plus(key)
 
     if "/" not in key:
@@ -87,11 +84,7 @@ def lambda_handler(event, context):
     timestamp = datetime.now().strftime("%B %-d %Y %-I-%M %p")
     attachment_name = f"ESF WF data file {timestamp}.xlsx"
 
-    # 1. download from S3
     local_file = download_file_from_s3(bucket, key)
-    logger.info(f"Downloaded file to {local_file}")
-
-    # 2. send email
     response = send_email_with_attachment(
         to_email=to_email,
         subject=subject,

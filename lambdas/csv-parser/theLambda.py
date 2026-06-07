@@ -13,24 +13,16 @@ import time
 from openpyxl.utils import column_index_from_string
 from datetime import datetime
 
-# AWS clients
 s3 = boto3.client("s3")
 sns_client = boto3.client("sns")
 
-# Logging
 logger = logging.getLogger()
 logger.setLevel(logging.INFO)
 
-# Config
 CSV_BUCKET = os.environ.get("CSV_BUCKET")
 NS = {"main": "http://schemas.openxmlformats.org/spreadsheetml/2006/main"}
 
 
-# =========================
-# New Logic
-# =========================
-#Idea, we take the first two files and make copies of them and place them inside the s3 bucket. 
-#Then for NEW IT contractor report, we take the open and closed sheets and make copies of them and place them inside the s3 bucket.
 def process_file(filename, file_content):
     try:
         if not filename.lower().endswith(".xlsx"):
@@ -43,7 +35,6 @@ def process_file(filename, file_content):
 
         results = []
 
-        #For NEW-IT Contractor report, split the two sheets into two seperate excel files Open and Closed
         if filename.startswith("NEW-IT Contractor-VG-Vendor Req Report"):
             for sheet in ("Open", "Closed"):
                 logger.info("Processing sheet '%s' (NEW-IT) from: %s", sheet, filename)
@@ -66,7 +57,7 @@ def process_file(filename, file_content):
 
             return results
 
-        # Default behavior: create a timestamped copy of the incoming file in the CSV bucket
+        # All other reports: copy as-is with a timestamp so rollcall-lambda can find the newest by prefix
         copy_key = f"{clean_base}-copy-{timestamp}.xlsx"
         s3.put_object(
             Bucket=CSV_BUCKET,
@@ -93,10 +84,9 @@ def extract_sheet_to_xlsx_bytes(xlsx_bytes, sheet_name):
         dst = new_wb.active
         dst.title = src.title
 
-        # Copy cells with values and basic styles/number formats
         for row in src.iter_rows():
             for cell in row:
-                # Determine column index safely
+                # col_idx may not exist on merged/special cells; fall back to conversion
                 col_idx = getattr(cell, 'col_idx', None)
                 if col_idx is None:
                     try:
@@ -116,7 +106,6 @@ def extract_sheet_to_xlsx_bytes(xlsx_bytes, sheet_name):
                 except Exception:
                     pass
 
-        # Copy column widths
         try:
             for col_letter, dim in src.column_dimensions.items():
                 if dim.width is not None:
@@ -124,7 +113,6 @@ def extract_sheet_to_xlsx_bytes(xlsx_bytes, sheet_name):
         except Exception:
             pass
 
-        # Copy row heights
         try:
             for idx, dim in src.row_dimensions.items():
                 if getattr(dim, 'height', None) is not None:
@@ -132,14 +120,12 @@ def extract_sheet_to_xlsx_bytes(xlsx_bytes, sheet_name):
         except Exception:
             pass
 
-        # Copy merged cells
         try:
             for merged in src.merged_cells.ranges:
                 dst.merge_cells(str(merged))
         except Exception:
             pass
 
-        # Freeze panes
         try:
             if src.freeze_panes:
                 dst.freeze_panes = src.freeze_panes
@@ -158,9 +144,6 @@ def extract_sheet_to_xlsx_bytes(xlsx_bytes, sheet_name):
 
 
 
-# =========================
-# XLSX Parsing Helper
-# =========================
 def col_letter_to_index(col):
     index = 0
     for char in col:
@@ -168,9 +151,7 @@ def col_letter_to_index(col):
     return index - 1
 
 
-# =========================
-# CSV Parsing
-# =========================
+
 def parse_csv_to_rows(csv_bytes):
     try:
         text = csv_bytes.decode("utf-8")
@@ -181,9 +162,7 @@ def parse_csv_to_rows(csv_bytes):
     return list(reader)
 
 
-# =========================
-# SNS Publisher
-# =========================
+
 def publish_to_sns(object_key: str):
     topic_arn = os.environ.get("SNS_TOPIC_ARN")
 
@@ -205,9 +184,7 @@ def publish_to_sns(object_key: str):
         logger.error("Error publishing to SNS: %s", e)
 
 
-# =========================
-# File Processor
-# =========================
+
 def _get_object_with_retry(bucket, key, max_retries=3):
     for attempt in range(max_retries):
         try:
@@ -231,9 +208,7 @@ def wipe_buckets():
     logger.info("Wiped %d object(s) from %s", count, CSV_BUCKET)
 
 
-# =========================
-# Lambda Handler
-# =========================
+
 def lambda_handler(event, context):
     start = time.time()
     logger.info(f"Event received: {json.dumps(event, indent=2)}")
