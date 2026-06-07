@@ -226,18 +226,21 @@ def _get_object_with_retry(bucket, key, max_retries=3):
 def wipe_buckets():
     s3_resource = boto3.resource("s3")
     bucket = s3_resource.Bucket(CSV_BUCKET)
-    bucket.objects.all().delete()
+    response = bucket.objects.all().delete()
+    count = len(response[0].get("Deleted", [])) if response else 0
+    logger.info("Wiped %d object(s) from %s", count, CSV_BUCKET)
 
 
 # =========================
 # Lambda Handler
 # =========================
 def lambda_handler(event, context):
-    # Delete all objects before putting news ones in it
+    start = time.time()
+    logger.info(f"Event received: {json.dumps(event, indent=2)}")
+
     wipe_buckets()
 
-    logger.info(f"Event received: {json.dumps(event, indent=2)}")
-    sender_email =json.loads(json.loads(event["Records"][0]["body"])["Message"])["mail"]["source"]
+    sender_email = json.loads(json.loads(event["Records"][0]["body"])["Message"])["mail"]["source"]
     logger.info(f"Email source detected: {sender_email}")
 
     BLOCKED_SENDERS = {"no-reply-aws@amazon.com"}
@@ -270,6 +273,7 @@ def lambda_handler(event, context):
 
             filename = part.get_filename()
             if not filename:
+                logger.info("Skipping attachment part with no filename (Content-Type: %s)", part.get_content_type())
                 continue
 
             file_content = part.get_payload(decode=True)
@@ -280,9 +284,11 @@ def lambda_handler(event, context):
 
             del file_content
 
-    logger.info("Processed %d/%d files", len(processed_files), total_files)
+    logger.info("Processed %d/%d files: %s", len(processed_files), total_files, processed_files)
     publish_to_sns(sender_email)
 
+    elapsed = time.time() - start
+    logger.info("Handler complete in %.2fs", elapsed)
     return {
         "status": "success",
         "processed_files": processed_files,

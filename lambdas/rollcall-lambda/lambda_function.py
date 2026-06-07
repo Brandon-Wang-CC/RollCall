@@ -1,5 +1,6 @@
 import json
 import logging
+import time
 import boto3
 import io
 import botocore.exceptions
@@ -64,15 +65,16 @@ FILTER_CONFIG = {
 # =========================
 def get_newest_file_by_prefix(bucket_name, prefix):
     response = s3.list_objects_v2(Bucket=bucket_name)
-    logger.info("ListObjectsV2 response: {}".format(response))
+    all_objects = response.get("Contents", [])
+    logger.info("ListObjectsV2: %d object(s) in bucket, searching for prefix '%s'", len(all_objects), prefix)
     matches = [
-        obj for obj in response.get("Contents", [])
+        obj for obj in all_objects
         if obj["Key"].startswith(prefix) and obj["Key"].endswith(".xlsx")
     ]
     if not matches:
         raise FileNotFoundError(f"No files found with prefix: {prefix}")
     newest = max(matches, key=lambda x: x["LastModified"])
-    logger.info(f"Found newest file for '{prefix}': {newest['Key']}")
+    logger.info(f"Found newest file for '{prefix}': {newest['Key']} (last modified: {newest['LastModified']})")
     return newest["Key"]
 
 def discover_files(bucket_name):
@@ -823,7 +825,7 @@ def write_output_workbook(crew_unfilled, crew_filled, contractor_unfilled, contr
     logger.info(f"Output workbook written to '{output_path}'")
     key = f"{ret_addr}/{OUTPUT_KEY}"
     s3.upload_file(output_path, DEPTS_BUCKET, key)
-    logger.info(f"Uploaded '{OUTPUT_FILE}' to S3 bucket '{ret_addr}'")
+    logger.info(f"Uploaded output to s3://{DEPTS_BUCKET}/{key}")
 
     return output_path
 
@@ -832,10 +834,11 @@ def write_output_workbook(crew_unfilled, crew_filled, contractor_unfilled, contr
 # =========================
 
 def lambda_handler(event, context):
+    start = time.time()
     logger.info("Lambda handler invoked")
     logger.info(f"Event: {json.dumps(event, indent=2)}")
     ret_addr = json.loads(json.loads(event["Records"][0].get("body", "{}")).get("Message", "{}")).get("retAddr")
-    logger.info(f"Return address: {ret_addr}")
+    logger.info(f"Return address (output folder): {ret_addr}")
     discovered  = discover_files(BUCKET_NAME)
     local_files = download_all_files(BUCKET_NAME, discovered)
     filtered    = filter_all_files(local_files)
@@ -854,7 +857,8 @@ def lambda_handler(event, context):
         crew_unfilled, crew_filled, contractor_unfilled, contractor_filled, ret_addr
     )
 
-    logger.info(f"Process complete. Output written to: {output_path}")
+    elapsed = time.time() - start
+    logger.info(f"Process complete in {elapsed:.2f}s. Output written to: {output_path}")
     return {
         "statusCode": 200,
         "status": "success",
