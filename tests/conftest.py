@@ -3,6 +3,11 @@ import io
 import json
 import os
 
+# Must be set before any Lambda module is imported — they create boto3 clients at module level.
+os.environ.setdefault("AWS_DEFAULT_REGION", "us-east-1")
+os.environ.setdefault("AWS_ACCESS_KEY_ID", "test")
+os.environ.setdefault("AWS_SECRET_ACCESS_KEY", "test")
+
 import openpyxl
 from email.mime.multipart import MIMEMultipart
 from email.mime.application import MIMEApplication
