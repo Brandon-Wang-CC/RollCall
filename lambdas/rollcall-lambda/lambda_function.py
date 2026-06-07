@@ -826,7 +826,7 @@ def write_output_workbook(crew_unfilled, crew_filled, contractor_unfilled, contr
     # Step 3 — merge: new data takes precedence; rows no longer in reports are carried forward
     new_req_nums    = set(new_df["Req #"].dropna())
     carried_forward = prev_df[~prev_df["Req #"].isin(new_req_nums)].copy()
-    carried_forward["Existing v New"] = "Carried Forward"
+    carried_forward["Existing v New"] = "Removed"
     logger.info(f"Carried forward from previous run: {len(carried_forward)} rows")
 
     combined = pd.concat([new_df, carried_forward], ignore_index=True)
@@ -849,8 +849,14 @@ def write_output_workbook(crew_unfilled, crew_filled, contractor_unfilled, contr
     s3.upload_file(output_path, DEPTS_BUCKET, key, ExtraArgs={"Metadata": s3_meta} if s3_meta else {})
     logger.info(f"Uploaded output to s3://{DEPTS_BUCKET}/{key}")
 
-    s3.upload_file(output_path, DEPTS_BUCKET, REF_KEY)
-    logger.info(f"Updated reference copy at s3://{DEPTS_BUCKET}/{REF_KEY}")
+    # Removed rows are excluded from the carry-forward seed so they surface exactly
+    # once in the output and never reappear on subsequent runs.
+    ref_df   = combined[combined["Existing v New"] != "Removed"]
+    ref_path = os.path.join(TMP_DIR, "ESF WF data file.ref.xlsx")
+    with pd.ExcelWriter(ref_path, engine="openpyxl") as writer:
+        ref_df.to_excel(writer, sheet_name="Output", index=False)
+    s3.upload_file(ref_path, DEPTS_BUCKET, REF_KEY)
+    logger.info(f"Updated reference copy at s3://{DEPTS_BUCKET}/{REF_KEY} ({len(ref_df)} rows, Removed excluded)")
 
     return output_path
 
