@@ -103,7 +103,7 @@ jobs:
 
           with open(os.environ['GITHUB_OUTPUT'], 'a') as f:
             for k, v in outputs.items():
-              f.write(f'{k}={v}\n')
+              f.write(f'{k}<<__DELIM__\n{v}\n__DELIM__\n')
           EOF
 
   # ── Deploy all stacks in dependency order, then run post-deploy steps ────────
