@@ -15,6 +15,12 @@ aws:
   #   aws iam get-role --role-name GitHubActionsDeploy --query Role.Arn --output text
   oidcRoleArn: arn:aws:iam::844905860028:role/GitHubActionsDeploy
 
+# S3 bucket names — must be globally unique across all AWS accounts.
+buckets:
+  csv: rollcall-s3-csv
+  depts: rollcall-s3-depts-reference
+  ses: rollcall-s3-ses
+
 # CloudFormation stack names — change these to avoid collisions if deploying
 # multiple environments into the same account.
 stacks:
