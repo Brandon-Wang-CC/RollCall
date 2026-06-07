@@ -10,6 +10,9 @@ Parameters:
   CsvBucket:
     Type: String
     Description: S3 bucket to write processed XLSX attachments to
+  SenderEmail:
+    Type: String
+    Description: Verified SES email address used to send failure notifications
   FilePrefixUnfilled:
     Type: String
     Description: Filename prefix for the unfilled requisitions report
@@ -42,6 +45,7 @@ Resources:
         Variables:
           SNS_TOPIC_ARN: !Sub arn:aws:sns:${AWS::Region}:${AWS::AccountId}:dataReceived${Env}
           CSV_BUCKET: !Ref CsvBucket
+          SENDER_EMAIL: !Ref SenderEmail
           FILE_PREFIX_UNFILLED: !Ref FilePrefixUnfilled
           FILE_PREFIX_CONTRACTOR_OPEN: !Ref FilePrefixContractorOpen
           FILE_PREFIX_CANDIDATES: !Ref FilePrefixCandidates

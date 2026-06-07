@@ -6,15 +6,18 @@ import io
 import botocore.exceptions
 import os
 import pandas as pd
+import email.mime.text
 from datetime import datetime, timedelta
 
 logger = logging.getLogger()
 logger.setLevel(logging.INFO)
 
-s3 = boto3.client("s3")
+s3   = boto3.client("s3")
+ses  = boto3.client("ses")
 
 BUCKET_NAME  = os.environ.get("CSV_BUCKET")
 DEPTS_BUCKET = os.environ.get("DEPTS_BUCKET")
+SENDER_EMAIL = os.environ.get("SENDER_EMAIL")
 TMP_DIR = "/tmp" if os.environ.get("AWS_EXECUTION_ENV") else os.path.join(os.path.dirname(os.path.abspath(__file__)), "tmp")
 
 
@@ -419,12 +422,6 @@ def build_contractor_unfilled(filtered, ref):
     # ESF Reqs lookup as strings (contractor req numbers may be non-numeric)
     esf_reqs["Req #"] = esf_reqs["Req #"].astype(str).str.strip()
     req_exists_set = set(esf_reqs["Req #"].dropna())
-    req_to_hire = (
-        esf_reqs.dropna(subset=["Req #"])
-        .set_index("Req #")["Hire Name"]
-        .to_dict()
-        if "Hire Name" in esf_reqs.columns else {}
-    )
 
     rows = []
     for idx, row in df.iterrows():
@@ -466,8 +463,7 @@ def build_contractor_unfilled(filtered, ref):
             if req_num_str not in req_exists_set and req_num_str not in prev_req_nums:
                 existing_v_new = "NEW"
             else:
-                esf_hire = req_to_hire.get(req_num_str, "")
-                existing_v_new = "Open" if (pd.isna(esf_hire) or esf_hire == "") else "Filled"
+                existing_v_new = "Existing"
 
             loc = str(row.get("LOC", "")).strip()
             state = {"PA": "Pennsylvania", "TX": "Texas"}.get(loc, loc)
@@ -806,43 +802,95 @@ def write_output_workbook(crew_unfilled, crew_filled, contractor_unfilled, contr
 
     return output_path
 
+def _send_failure_email(to_email, subject_ref="", error_msg="", orig_message_id="", source=""):
+    if not to_email or not SENDER_EMAIL:
+        logger.warning("Cannot send failure notification — sender or recipient email not configured")
+        return
+    try:
+        if subject_ref:
+            prefix = "" if subject_ref.upper().startswith("RE:") else "RE: "
+            subject = f"{prefix}{subject_ref}"
+        else:
+            subject = "Pipeline Error — Report Generation Failed"
+
+        ref = f' "{subject_ref}"' if subject_ref else ""
+        body = (
+            f"Your files{ref} were received, but an error occurred while generating "
+            "the reconciliation report. No output workbook was delivered.\n\n"
+        )
+        if error_msg:
+            body += f"Error: {error_msg}\n\n"
+        body += (
+            "Please resubmit your files. If the problem continues, contact your administrator."
+        )
+        if source:
+            body += f"\n\nFailed in: {source}"
+
+        msg = email.mime.text.MIMEText(body, "plain")
+        msg["Subject"] = subject
+        msg["From"]    = SENDER_EMAIL
+        msg["To"]      = to_email
+        if orig_message_id:
+            msg["In-Reply-To"] = orig_message_id
+            msg["References"]  = orig_message_id
+
+        ses.send_raw_email(
+            Source=SENDER_EMAIL,
+            Destinations=[to_email],
+            RawMessage={"Data": msg.as_string()},
+        )
+        logger.info("Failure notification sent to %s", to_email)
+    except Exception as e:
+        logger.error("Could not send failure notification to %s: %s", to_email, e)
+
+
 def lambda_handler(event, context):
     start = time.time()
     logger.info("Lambda handler invoked")
     logger.info(f"Event: {json.dumps(event, indent=2)}")
-    sns_payload = json.loads(json.loads(event["Records"][0].get("body", "{}")).get("Message", "{}"))
-    ret_addr        = sns_payload.get("retAddr")
-    orig_message_id = sns_payload.get("origMessageId", "")
-    orig_subject    = sns_payload.get("origSubject", "")
-    logger.info("Return address: %s | origMessageId: %s | origSubject: %s", ret_addr, orig_message_id, orig_subject)
-    discovered  = discover_files(BUCKET_NAME)
-    local_files = download_all_files(BUCKET_NAME, discovered)
-    filtered    = filter_all_files(local_files)
 
-    dept_codes = load_dept_codes(DEPTS_BUCKET, CC_ID_FILE)
-    filtered["candidates"] = filter_candidates(local_files["candidates"], dept_codes)
+    ret_addr        = None
+    orig_message_id = ""
+    orig_subject    = ""
+    try:
+        sns_payload     = json.loads(json.loads(event["Records"][0].get("body", "{}")).get("Message", "{}"))
+        ret_addr        = sns_payload.get("retAddr")
+        orig_message_id = sns_payload.get("origMessageId", "")
+        orig_subject    = sns_payload.get("origSubject", "")
+        logger.info("Return address: %s | origMessageId: %s | origSubject: %s", ret_addr, orig_message_id, orig_subject)
+        discovered  = discover_files(BUCKET_NAME)
+        local_files = download_all_files(BUCKET_NAME, discovered)
+        filtered    = filter_all_files(local_files)
 
-    ref = load_reference_data(DEPTS_BUCKET)
+        dept_codes = load_dept_codes(DEPTS_BUCKET, CC_ID_FILE)
+        filtered["candidates"] = filter_candidates(local_files["candidates"], dept_codes)
 
-    crew_unfilled       = build_crew_unfilled(filtered, ref)
-    crew_filled         = build_crew_filled(filtered, ref)
-    contractor_unfilled = build_contractor_unfilled(filtered, ref)
-    contractor_filled   = build_contractor_filled(filtered, ref)
+        ref = load_reference_data(DEPTS_BUCKET)
 
-    output_path = write_output_workbook(
-        crew_unfilled, crew_filled, contractor_unfilled, contractor_filled, ret_addr,
-        ref=ref, orig_message_id=orig_message_id, orig_subject=orig_subject,
-    )
+        crew_unfilled       = build_crew_unfilled(filtered, ref)
+        crew_filled         = build_crew_filled(filtered, ref)
+        contractor_unfilled = build_contractor_unfilled(filtered, ref)
+        contractor_filled   = build_contractor_filled(filtered, ref)
 
-    elapsed = time.time() - start
-    logger.info(f"Process complete in {elapsed:.2f}s. Output written to: {output_path}")
-    return {
-        "statusCode": 200,
-        "status": "success",
-        "body": json.dumps({
-            "message": "Headcount reconciliation complete",
-            "retAddr": ret_addr,
-            "bucket": DEPTS_BUCKET,
-            "key": OUTPUT_KEY
-        })
-    }
+        output_path = write_output_workbook(
+            crew_unfilled, crew_filled, contractor_unfilled, contractor_filled, ret_addr,
+            ref=ref, orig_message_id=orig_message_id, orig_subject=orig_subject,
+        )
+
+        elapsed = time.time() - start
+        logger.info(f"Process complete in {elapsed:.2f}s. Output written to: {output_path}")
+        return {
+            "statusCode": 200,
+            "status": "success",
+            "body": json.dumps({
+                "message": "Headcount reconciliation complete",
+                "retAddr": ret_addr,
+                "bucket": DEPTS_BUCKET,
+                "key": OUTPUT_KEY
+            })
+        }
+
+    except Exception as e:
+        logger.error("Unhandled exception: %s", e, exc_info=True)
+        _send_failure_email(ret_addr, orig_subject, error_msg=str(e), orig_message_id=orig_message_id, source=context.function_name)
+        raise
