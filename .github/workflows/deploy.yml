@@ -113,9 +113,79 @@ jobs:
               f.write(f'{k}={val}\n')
           EOF
 
+  # ── Resolve any stacks in undeployable states before touching resources ───────
+  # Delete states: stack exists but can't be updated — remove so deploy recreates it.
+  # Wait states: transient operation in progress — let it finish before deploying.
+  # Fatal states (ROLLBACK_FAILED, UPDATE_ROLLBACK_FAILED, DELETE_FAILED) are left
+  # alone — resources are in an unknown state and need manual intervention.
+  preflight:
+    name: Pre-flight checks
+    needs: load-config
+    runs-on: ubuntu-latest
+    environment: production
+
+    env:
+      AWS_REGION:        ${{ needs.load-config.outputs.aws-region }}
+      ENV_SUFFIX:        -${{ inputs.env || 'test' }}
+      STACK_IAM:         ${{ needs.load-config.outputs.stack-iam }}-${{ inputs.env || 'test' }}
+      STACK_S3:          ${{ needs.load-config.outputs.stack-s3 }}-${{ inputs.env || 'test' }}
+      STACK_SNS:         ${{ needs.load-config.outputs.stack-sns }}-${{ inputs.env || 'test' }}
+      STACK_SQS:         ${{ needs.load-config.outputs.stack-sqs }}-${{ inputs.env || 'test' }}
+      STACK_SES:         ${{ needs.load-config.outputs.stack-ses }}-${{ inputs.env || 'test' }}
+      STACK_CLOUDWATCH:  ${{ needs.load-config.outputs.stack-cloudwatch }}-${{ inputs.env || 'test' }}
+      STACK_CSV_PARSER:  ${{ needs.load-config.outputs.stack-csv-parser }}-${{ inputs.env || 'test' }}
+      STACK_ROLLCALL:    ${{ needs.load-config.outputs.stack-rollcall }}-${{ inputs.env || 'test' }}
+      STACK_SES_EMAILER: ${{ needs.load-config.outputs.stack-ses-emailer }}-${{ inputs.env || 'test' }}
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ needs.load-config.outputs.oidc-role-arn }}
+          aws-region:     ${{ needs.load-config.outputs.aws-region }}
+
+      - name: Resolve stacks in undeployable states
+        run: |
+          for stack in $STACK_IAM $STACK_S3 $STACK_SNS $STACK_SQS $STACK_SES $STACK_CLOUDWATCH $STACK_CSV_PARSER $STACK_ROLLCALL $STACK_SES_EMAILER; do
+            status=$(aws cloudformation describe-stacks --stack-name "$stack" --region $AWS_REGION \
+              --query "Stacks[0].StackStatus" --output text 2>/dev/null || echo "DOES_NOT_EXIST")
+            case "$status" in
+              ROLLBACK_COMPLETE|REVIEW_IN_PROGRESS|CREATE_FAILED)
+                echo "Deleting $stack ($status)..."
+                aws cloudformation delete-stack --stack-name "$stack" --region $AWS_REGION
+                aws cloudformation wait stack-delete-complete --stack-name "$stack" --region $AWS_REGION
+                ;;
+              ROLLBACK_IN_PROGRESS)
+                echo "Waiting for $stack rollback to complete..."
+                aws cloudformation wait stack-rollback-complete --stack-name "$stack" --region $AWS_REGION
+                echo "Deleting $stack (ROLLBACK_COMPLETE)..."
+                aws cloudformation delete-stack --stack-name "$stack" --region $AWS_REGION
+                aws cloudformation wait stack-delete-complete --stack-name "$stack" --region $AWS_REGION
+                ;;
+              UPDATE_ROLLBACK_IN_PROGRESS|UPDATE_ROLLBACK_COMPLETE_CLEANUP_IN_PROGRESS)
+                echo "Waiting for $stack update rollback to complete..."
+                aws cloudformation wait stack-update-complete --stack-name "$stack" --region $AWS_REGION || true
+                ;;
+              UPDATE_COMPLETE_CLEANUP_IN_PROGRESS)
+                echo "Waiting for $stack to finish cleanup..."
+                aws cloudformation wait stack-update-complete --stack-name "$stack" --region $AWS_REGION
+                ;;
+              DELETE_IN_PROGRESS)
+                echo "Waiting for $stack deletion to finish..."
+                aws cloudformation wait stack-delete-complete --stack-name "$stack" --region $AWS_REGION
+                ;;
+              ROLLBACK_FAILED|UPDATE_ROLLBACK_FAILED|DELETE_FAILED)
+                echo "ERROR: $stack is in $status — manual intervention required before deploying."
+                exit 1
+                ;;
+            esac
+          done
+
   # ── Deploy all stacks in dependency order, then run post-deploy steps ────────
   deploy:
-    needs: load-config
+    needs: [load-config, preflight]
     runs-on: ubuntu-latest
     environment: production
 
@@ -158,49 +228,6 @@ jobs:
         uses: aws-actions/setup-sam@v2
         with:
           use-installer: true
-
-      # ── Pre-flight: resolve stacks in undeployable states ────────────────────
-      # Delete states: stack exists but can't be updated — remove so deploy recreates it.
-      # Wait states: transient operation in progress — let it finish before deploying.
-      # Fatal states (ROLLBACK_FAILED, UPDATE_ROLLBACK_FAILED, DELETE_FAILED) are left
-      # alone — resources are in an unknown state and need manual intervention.
-
-      - name: Resolve stacks in undeployable states
-        run: |
-          for stack in $STACK_IAM $STACK_S3 $STACK_SNS $STACK_SQS $STACK_SES $STACK_CLOUDWATCH $STACK_CSV_PARSER $STACK_ROLLCALL $STACK_SES_EMAILER; do
-            status=$(aws cloudformation describe-stacks --stack-name "$stack" --region $AWS_REGION \
-              --query "Stacks[0].StackStatus" --output text 2>/dev/null || echo "DOES_NOT_EXIST")
-            case "$status" in
-              ROLLBACK_COMPLETE|REVIEW_IN_PROGRESS|CREATE_FAILED)
-                echo "Deleting $stack ($status)..."
-                aws cloudformation delete-stack --stack-name "$stack" --region $AWS_REGION
-                aws cloudformation wait stack-delete-complete --stack-name "$stack" --region $AWS_REGION
-                ;;
-              ROLLBACK_IN_PROGRESS)
-                echo "Waiting for $stack rollback to complete..."
-                aws cloudformation wait stack-rollback-complete --stack-name "$stack" --region $AWS_REGION
-                echo "Deleting $stack (ROLLBACK_COMPLETE)..."
-                aws cloudformation delete-stack --stack-name "$stack" --region $AWS_REGION
-                aws cloudformation wait stack-delete-complete --stack-name "$stack" --region $AWS_REGION
-                ;;
-              UPDATE_ROLLBACK_IN_PROGRESS|UPDATE_ROLLBACK_COMPLETE_CLEANUP_IN_PROGRESS)
-                echo "Waiting for $stack update rollback to complete..."
-                aws cloudformation wait stack-update-complete --stack-name "$stack" --region $AWS_REGION || true
-                ;;
-              UPDATE_COMPLETE_CLEANUP_IN_PROGRESS)
-                echo "Waiting for $stack to finish cleanup..."
-                aws cloudformation wait stack-update-complete --stack-name "$stack" --region $AWS_REGION
-                ;;
-              DELETE_IN_PROGRESS)
-                echo "Waiting for $stack deletion to finish..."
-                aws cloudformation wait stack-delete-complete --stack-name "$stack" --region $AWS_REGION
-                ;;
-              ROLLBACK_FAILED|UPDATE_ROLLBACK_FAILED|DELETE_FAILED)
-                echo "ERROR: $stack is in $status — manual intervention required before deploying."
-                exit 1
-                ;;
-            esac
-          done
 
       # ── Infrastructure ────────────────────────────────────────────────────────
 
