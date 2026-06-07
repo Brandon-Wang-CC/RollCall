@@ -185,15 +185,12 @@ def publish_to_sns(ret_addr: str, orig_message_id: str = "", orig_subject: str =
         "origMessageId": orig_message_id,
         "origSubject": orig_subject,
     }
-    try:
-        response = sns_client.publish(
-            TopicArn=topic_arn,
-            Message=json.dumps(message),
-            Subject="New XLSX File Processed"
-        )
-        logger.info("Published SNS message: %s", response["MessageId"])
-    except Exception as e:
-        logger.error("Error publishing to SNS: %s", e)
+    response = sns_client.publish(
+        TopicArn=topic_arn,
+        Message=json.dumps(message),
+        Subject="New XLSX File Processed"
+    )
+    logger.info("Published SNS message: %s", response["MessageId"])
 
 
 def _send_failure_email(to_email, subject_ref=""):

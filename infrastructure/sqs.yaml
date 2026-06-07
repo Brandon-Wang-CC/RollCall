@@ -32,7 +32,7 @@ Resources:
     Type: AWS::SQS::Queue
     Properties:
       QueueName: !Sub "rollcall-sqs${Env}"
-      VisibilityTimeout: 300
+      VisibilityTimeout: 360
       MessageRetentionPeriod: 345600
       ReceiveMessageWaitTimeSeconds: 20
       RedrivePolicy:
