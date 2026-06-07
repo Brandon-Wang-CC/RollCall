@@ -3,6 +3,7 @@ import io
 import logging
 import json
 import email
+import email.mime.text
 import os
 import zipfile
 import xml.etree.ElementTree as ET
@@ -193,11 +194,17 @@ def publish_to_sns(ret_addr: str, orig_message_id: str = "", orig_subject: str =
     logger.info("Published SNS message: %s", response["MessageId"])
 
 
-def _send_failure_email(to_email, subject_ref="", error_msg=""):
+def _send_failure_email(to_email, subject_ref="", error_msg="", orig_message_id=""):
     if not to_email or not SENDER_EMAIL:
         logger.warning("Cannot send failure notification — sender or recipient email not configured")
         return
     try:
+        if subject_ref:
+            prefix = "" if subject_ref.upper().startswith("RE:") else "RE: "
+            subject = f"{prefix}{subject_ref}"
+        else:
+            subject = "Pipeline Error — Unable to Process Submission"
+
         ref = f' "{subject_ref}"' if subject_ref else ""
         body = (
             f"Your submission{ref} could not be processed. An error occurred while "
@@ -209,13 +216,19 @@ def _send_failure_email(to_email, subject_ref="", error_msg=""):
             "Please check that all required report files are attached and resubmit. "
             "If the problem continues, contact your administrator."
         )
-        ses_client.send_email(
+
+        msg = email.mime.text.MIMEText(body, "plain")
+        msg["Subject"] = subject
+        msg["From"]    = SENDER_EMAIL
+        msg["To"]      = to_email
+        if orig_message_id:
+            msg["In-Reply-To"] = orig_message_id
+            msg["References"]  = orig_message_id
+
+        ses_client.send_raw_email(
             Source=SENDER_EMAIL,
-            Destination={"ToAddresses": [to_email]},
-            Message={
-                "Subject": {"Data": "Pipeline Error — Unable to Process Submission"},
-                "Body":    {"Text": {"Data": body}},
-            },
+            Destinations=[to_email],
+            RawMessage={"Data": msg.as_string()},
         )
         logger.info("Failure notification sent to %s", to_email)
     except Exception as e:
@@ -331,5 +344,5 @@ def lambda_handler(event, context):
 
     except Exception as e:
         logger.error("Unhandled exception: %s", e, exc_info=True)
-        _send_failure_email(sender_email, orig_subject, error_msg=str(e))
+        _send_failure_email(sender_email, orig_subject, error_msg=str(e), orig_message_id=orig_message_id)
         raise

@@ -6,6 +6,7 @@ import io
 import botocore.exceptions
 import os
 import pandas as pd
+import email.mime.text
 from datetime import datetime, timedelta
 
 logger = logging.getLogger()
@@ -801,11 +802,17 @@ def write_output_workbook(crew_unfilled, crew_filled, contractor_unfilled, contr
 
     return output_path
 
-def _send_failure_email(to_email, subject_ref="", error_msg=""):
+def _send_failure_email(to_email, subject_ref="", error_msg="", orig_message_id=""):
     if not to_email or not SENDER_EMAIL:
         logger.warning("Cannot send failure notification — sender or recipient email not configured")
         return
     try:
+        if subject_ref:
+            prefix = "" if subject_ref.upper().startswith("RE:") else "RE: "
+            subject = f"{prefix}{subject_ref}"
+        else:
+            subject = "Pipeline Error — Report Generation Failed"
+
         ref = f' "{subject_ref}"' if subject_ref else ""
         body = (
             f"Your files{ref} were received, but an error occurred while generating "
@@ -816,13 +823,19 @@ def _send_failure_email(to_email, subject_ref="", error_msg=""):
         body += (
             "Please resubmit your files. If the problem continues, contact your administrator."
         )
-        ses.send_email(
+
+        msg = email.mime.text.MIMEText(body, "plain")
+        msg["Subject"] = subject
+        msg["From"]    = SENDER_EMAIL
+        msg["To"]      = to_email
+        if orig_message_id:
+            msg["In-Reply-To"] = orig_message_id
+            msg["References"]  = orig_message_id
+
+        ses.send_raw_email(
             Source=SENDER_EMAIL,
-            Destination={"ToAddresses": [to_email]},
-            Message={
-                "Subject": {"Data": "Pipeline Error — Report Generation Failed"},
-                "Body":    {"Text": {"Data": body}},
-            },
+            Destinations=[to_email],
+            RawMessage={"Data": msg.as_string()},
         )
         logger.info("Failure notification sent to %s", to_email)
     except Exception as e:
@@ -877,5 +890,5 @@ def lambda_handler(event, context):
 
     except Exception as e:
         logger.error("Unhandled exception: %s", e, exc_info=True)
-        _send_failure_email(ret_addr, orig_subject, error_msg=str(e))
+        _send_failure_email(ret_addr, orig_subject, error_msg=str(e), orig_message_id=orig_message_id)
         raise
