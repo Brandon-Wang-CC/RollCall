@@ -63,9 +63,6 @@ The Contractor report is one workbook with two sheets (Open and Closed) — it c
 
 | Setting | What to put here |
 |---------|-----------------|
-| `CsvBucket` | Globally unique S3 bucket name for parsed attachments — e.g., `yourorg-rollcall-csv` |
-| `DeptsBucket` | Globally unique S3 bucket name for reference data and output workbooks — e.g., `yourorg-rollcall-data` |
-| `SesBucket` | Globally unique S3 bucket name for raw inbound emails — e.g., `yourorg-rollcall-ses` |
 | `SenderDomain` | The pipeline subdomain — e.g., `pipeline.yourdomain.com` |
 | `SenderEmail` | The full pipeline address — e.g., `rollcall@pipeline.yourdomain.com` |
 | `MD1Name` | Name and employee ID stamped into the MD-1 column of every output row |
@@ -74,14 +71,17 @@ The Contractor report is one workbook with two sheets (Open and Closed) — it c
 | `FilePrefixContractorClosed` | Start of the contractor closed report filename |
 | `FilePrefixCandidates` | Start of the candidate flow report filename |
 
-S3 bucket names must be globally unique across all AWS accounts. If a name is already taken, the deploy will fail with `BucketAlreadyExists`. Use names that include your organization's name to reduce collisions.
-
 **`.github/deploy-config.yaml`**
 
 | Setting | What to put here |
 |---------|-----------------|
 | `aws.region` | AWS region — must be `us-east-1`, `us-west-2`, or `eu-west-1` |
 | `aws.oidcRoleArn` | ARN of the IAM role created by your AWS team in Step 2 |
+| `buckets.csv` | Globally unique S3 bucket name for parsed attachments — e.g., `yourorg-rollcall-csv` |
+| `buckets.depts` | Globally unique S3 bucket name for reference data and output workbooks — e.g., `yourorg-rollcall-data` |
+| `buckets.ses` | Globally unique S3 bucket name for raw inbound emails — e.g., `yourorg-rollcall-ses` |
+
+S3 bucket names must be globally unique across all AWS accounts. If a name is already taken, the deploy will fail with `BucketAlreadyExists`. Use names that include your organization's name to reduce collisions.
 
 The `stacks` section lists CloudFormation stack names. These can be left as-is unless they conflict with existing stacks in your account.
 
