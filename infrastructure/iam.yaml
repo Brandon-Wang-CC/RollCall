@@ -100,8 +100,6 @@ Resources:
             Action: sts:AssumeRole
       ManagedPolicyArns:
         - arn:aws:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole
-        - arn:aws:iam::aws:policy/AmazonSQSFullAccess
-        - arn:aws:iam::aws:policy/AmazonS3FullAccess
       Policies:
         - PolicyName: RollCallS3AccessPolicy
           PolicyDocument:
@@ -117,14 +115,17 @@ Resources:
                   - !Sub arn:aws:s3:::${CsvBucket}/*
                   - !Sub arn:aws:s3:::${DeptsBucket}
                   - !Sub arn:aws:s3:::${DeptsBucket}/*
-        - PolicyName: Lambda-invoke-ses-emailer-function
+        - PolicyName: RollCallSQSPolicy
           PolicyDocument:
             Version: '2012-10-17'
             Statement:
               - Effect: Allow
-                Action: lambda:InvokeFunction
-                Resource: !Sub arn:aws:lambda:${AWS::Region}:${AWS::AccountId}:function:ses-emailer-function${Env}
-        - PolicyName: SESFailureEmail
+                Action:
+                  - sqs:DeleteMessage
+                  - sqs:ReceiveMessage
+                  - sqs:GetQueueAttributes
+                Resource: !Sub arn:aws:sqs:${AWS::Region}:${AWS::AccountId}:rollcall-sqs${Env}
+        - PolicyName: SES-sendRawEmail
           PolicyDocument:
             Version: '2012-10-17'
             Statement:
@@ -132,8 +133,7 @@ Resources:
                 Action:
                   - ses:SendEmail
                   - ses:SendRawEmail
-                Resource:
-                  - !Sub arn:aws:ses:${AWS::Region}:${AWS::AccountId}:identity/*
+                Resource: !Sub arn:aws:ses:${AWS::Region}:${AWS::AccountId}:identity/${SenderDomain}
 
   # ─── ses-emailer-function ────────────────────────────────────────────────────
 
@@ -158,23 +158,11 @@ Resources:
             Statement:
               - Effect: Allow
                 Action: s3:GetObject
-                Resource: !Sub arn:aws:s3:::${CsvBucket}/*
-              - Effect: Allow
-                Action: s3:GetObject
                 Resource: !Sub arn:aws:s3:::${DeptsBucket}/*
               - Effect: Allow
-                Action: lambda:InvokeFunction
-                Resource: !Sub arn:aws:lambda:${AWS::Region}:${AWS::AccountId}:function:ses-emailer-function${Env}
-                Condition:
-                  ArnLike:
-                    AWS:SourceArn: !Sub arn:aws:s3:::${DeptsBucket}
-              - Effect: Allow
-                Action:
-                  - ses:SendEmail
-                  - ses:SendRawEmail
-                Resource:
-                  - !Sub arn:aws:ses:${AWS::Region}:${AWS::AccountId}:identity/${SenderDomain}
-                  - !Sub arn:aws:ses:${AWS::Region}:${AWS::AccountId}:identity/*
+                Action: ses:SendRawEmail
+                Resource: !Sub arn:aws:ses:${AWS::Region}:${AWS::AccountId}:identity/${SenderDomain}
+
   # ─── SES → S3 write role ─────────────────────────────────────────────────────
 
   # Assumed by SES to deliver inbound emails to the SES staging bucket

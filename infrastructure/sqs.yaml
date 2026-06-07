@@ -15,7 +15,7 @@ Resources:
     Properties:
       QueueName: !Sub "csv-parser-dlq${Env}"
       VisibilityTimeout: 360
-      MessageRetentionPeriod: 345600
+      MessageRetentionPeriod: 1209600
       SqsManagedSseEnabled: true
 
   # Dead-letter queue for rollcall-sqs — audit trail for failed runs (no retry)
@@ -24,7 +24,7 @@ Resources:
     Properties:
       QueueName: !Sub "rollcall-dlq-sqs${Env}"
       VisibilityTimeout: 360
-      MessageRetentionPeriod: 345600
+      MessageRetentionPeriod: 1209600
       SqsManagedSseEnabled: true
 
   # Main queue — receives from SNS dataReceived, triggers rollcall-lambda
@@ -56,15 +56,6 @@ Resources:
             Resource: !GetAtt RollCallQueue.Arn
             Condition:
               ArnEquals:
-                aws:SourceArn: !Sub arn:aws:sns:${AWS::Region}:${AWS::AccountId}:dataReceived${Env}
-          - Sid: topic-subscription-dataReceived
-            Effect: Allow
-            Principal:
-              AWS: '*'
-            Action: SQS:SendMessage
-            Resource: !GetAtt RollCallQueue.Arn
-            Condition:
-              ArnLike:
                 aws:SourceArn: !Sub arn:aws:sns:${AWS::Region}:${AWS::AccountId}:dataReceived${Env}
 
   # Receives from SNS emailReceived, triggers csvParser

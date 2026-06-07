@@ -30,6 +30,7 @@ Resources:
       EvaluationPeriods: 1
       Threshold: 3
       ComparisonOperator: GreaterThanOrEqualToThreshold
+      TreatMissingData: notBreaching
 
   # Fires when rollcall-lambda accumulates >= 3 errors in a 24-hour window
   RollCallLambdaErrorAlarm:
@@ -52,3 +53,4 @@ Resources:
       EvaluationPeriods: 1
       Threshold: 3
       ComparisonOperator: GreaterThanOrEqualToThreshold
+      TreatMissingData: notBreaching
