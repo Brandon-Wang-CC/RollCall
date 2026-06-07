@@ -10,9 +10,6 @@ Parameters:
   CsvBucket:
     Type: String
     Description: S3 bucket to write processed XLSX attachments to
-  SenderEmail:
-    Type: String
-    Description: Verified SES address used as From when sending failure notifications
   Env:
     Type: String
     Default: ""
@@ -36,7 +33,6 @@ Resources:
         Variables:
           SNS_TOPIC_ARN: !Sub arn:aws:sns:${AWS::Region}:${AWS::AccountId}:dataReceived${Env}
           CSV_BUCKET: !Ref CsvBucket
-          SENDER_EMAIL: !Ref SenderEmail
       Architectures:
         - x86_64
       EphemeralStorage:

@@ -741,28 +741,6 @@ def write_output_workbook(crew_unfilled, crew_filled, contractor_unfilled, contr
 
     return output_path
 
-def _notify_failure(ret_addr, error_msg):
-    if not ret_addr:
-        logger.warning("Cannot send failure notification — return address not yet known")
-        return
-    try:
-        boto3.client("ses").send_email(
-            Source=os.environ.get("SENDER_EMAIL", ""),
-            Destination={"ToAddresses": [ret_addr]},
-            Message={
-                "Subject": {"Data": "RollCall pipeline error"},
-                "Body": {"Text": {"Data": (
-                    f"Your RollCall pipeline run failed in rollcall-lambda.\n\n"
-                    f"Error: {error_msg}\n\n"
-                    f"Check CloudWatch logs (/aws/lambda/rollcall-lambda) for full details."
-                )}},
-            },
-        )
-        logger.info("Failure notification sent to %s", ret_addr)
-    except Exception as e:
-        logger.error("Could not send failure notification to %s: %s", ret_addr, e)
-
-
 def lambda_handler(event, context):
     start = time.time()
     logger.info("Lambda handler invoked")
@@ -805,5 +783,4 @@ def lambda_handler(event, context):
 
     except Exception as e:
         logger.error("Unhandled exception: %s", e, exc_info=True)
-        _notify_failure(ret_addr, str(e))
         raise
