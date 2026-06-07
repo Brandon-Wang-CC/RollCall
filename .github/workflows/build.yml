@@ -1,6 +1,6 @@
 name: Build
 
-run-name: Build — ${{ github.ref_name }}
+run-name: Build — ${{ github.ref_name }} (${{ github.event.head_commit.message }})
 
 on:
   workflow_dispatch:

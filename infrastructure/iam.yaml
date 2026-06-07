@@ -161,7 +161,9 @@ Resources:
                 Resource: !Sub arn:aws:s3:::${DeptsBucket}/*
               - Effect: Allow
                 Action: ses:SendRawEmail
-                Resource: !Sub arn:aws:ses:${AWS::Region}:${AWS::AccountId}:identity/${SenderDomain}
+                Resource:
+                  - !Sub arn:aws:ses:${AWS::Region}:${AWS::AccountId}:identity/${SenderDomain}
+                  - !Sub arn:aws:ses:${AWS::Region}:${AWS::AccountId}:identity/*
 
   # ─── SES → S3 write role ─────────────────────────────────────────────────────
 

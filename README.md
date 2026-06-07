@@ -95,7 +95,7 @@ Each row is classified with one of four values:
 
 | Value | Meaning |
 |-------|---------|
-| `New` | Req number has never appeared in any previous pipeline run |
+| `NEW` | Req number has never appeared in any previous pipeline run |
 | `Existing` | Req is known; no changes detected since the last run |
 | `Updated` | Req is known but the hire name or start date has changed |
 | `Removed` | Req was present in the previous run but is absent from the current reports |
