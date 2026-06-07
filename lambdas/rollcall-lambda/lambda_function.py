@@ -754,11 +754,15 @@ def _build_req_pivot(combined_df):
     return main_pivot, ges_pivot
 
 
-def _build_rc_tables(ref):
-    """Return (cc_table, md2_table) DataFrames for the RC reference sheet.
+def _build_rc_tables(ref, combined_df):
+    """Return (cc_table, md2_table, workforce_df) DataFrames for the RC reference sheet.
 
-    cc_table:  CC ID → Department mapping (from cc_id.csv).
-    md2_table: MD-2 name → Department mapping (from depts.csv).
+    cc_table:      CC ID → Department mapping (from cc_id.csv).
+    md2_table:     MD-2 name → Department mapping (from depts.csv).
+    workforce_df:  Two-row summary table (header + values) with per-department FTE
+                   totals computed from the combined output — equivalent to the
+                   =SUM('DEPT'!$Q:$Q) formulas in the original workbook, computed
+                   directly from the pipeline's data rather than referencing sheet cells.
     """
     cc_id_df = ref["cc_id"].copy()
     depts_df  = ref["depts"].copy()
@@ -783,7 +787,21 @@ def _build_rc_tables(ref):
     else:
         md2_table = pd.DataFrame(columns=["MD-2", "Department"])
 
-    return cc_table, md2_table
+    # Workforce summary: sum FTE per department from the combined output (all rows,
+    # including carried forward) — equivalent to =SUM('DEPT'!$Q:$Q) from the original.
+    fte = pd.to_numeric(combined_df["FTE"], errors="coerce").fillna(1)
+    dept_totals = combined_df.assign(_fte=fte).groupby("Department")["_fte"].sum()
+    depts_ordered = sorted(dept_totals.index.tolist())
+    grand_total = dept_totals.sum()
+
+    header_row = {"Crew & Contractors": "Current Workforce"}
+    for dept in depts_ordered:
+        header_row[dept] = int(dept_totals[dept])
+    header_row["ALL"] = int(grand_total)
+
+    workforce_df = pd.DataFrame([header_row])
+
+    return cc_table, md2_table, workforce_df
 
 
 def write_output_workbook(crew_unfilled, crew_filled, contractor_unfilled, contractor_filled, ret_addr, ref=None):
@@ -870,13 +888,20 @@ def write_output_workbook(crew_unfilled, crew_filled, contractor_unfilled, contr
                 ges_start_col = 1 + len(req_pivot.columns) + 2
                 ges_pivot.to_excel(writer, sheet_name="Req Pivot", startrow=0, startcol=ges_start_col)
 
-        # RC tab — CC ID → Department and MD-2 → Department reference tables
+        # RC tab — CC ID → Department, MD-2 → Department, and per-dept FTE totals
         if ref is not None:
-            cc_table, md2_table = _build_rc_tables(ref)
+            cc_table, md2_table, workforce_df = _build_rc_tables(ref, combined)
             cc_table.to_excel(writer, sheet_name="RC", startrow=0, startcol=0, index=False)
             if not md2_table.empty:
                 md2_start_col = len(cc_table.columns) + 2
                 md2_table.to_excel(writer, sheet_name="RC", startrow=0, startcol=md2_start_col, index=False)
+            # Workforce summary: place below the MD-2 table with a blank row gap
+            workforce_start_row = len(md2_table) + 2
+            workforce_df.to_excel(
+                writer, sheet_name="RC",
+                startrow=workforce_start_row, startcol=md2_start_col,
+                index=False,
+            )
 
     logger.info(f"Output workbook written to '{output_path}'")
     key = f"{ret_addr}/{OUTPUT_KEY}"
