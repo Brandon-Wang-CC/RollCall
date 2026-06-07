@@ -155,7 +155,15 @@ def test_lambda_handler_processes_xlsx_attachment():
 
 
 def test_lambda_handler_skips_non_xlsx_attachment():
-    raw_email = make_raw_email_bytes([("notes.txt", b"some text")])
+    # Non-xlsx files are counted but never added to seen_filenames.
+    # When FILE_PREFIX_* env vars are unset (""), any xlsx filename satisfies
+    # each prefix check — but seen_filenames must be non-empty for that to apply.
+    # Including one valid xlsx alongside the non-xlsx satisfies the validation.
+    xlsx = make_xlsx_bytes(rows=[["col1"]])
+    raw_email = make_raw_email_bytes([
+        ("Unfilled Reqs.xlsx", xlsx),
+        ("notes.txt", b"some text"),
+    ])
     event = make_csv_parser_event()
 
     mock_s3 = mock_s3_get(raw_email)
@@ -170,13 +178,14 @@ def test_lambda_handler_skips_non_xlsx_attachment():
         result = csv_parser.lambda_handler(event, {})
 
     assert result["status"] == "success"
-    assert result["total_files"] == 1
-    assert result["processed_files"] == []
+    assert result["total_files"] == 2
+    assert len(result["processed_files"]) == 1   # only the xlsx was processed
     mock_sns.publish.assert_called_once()
 
 
 def test_lambda_handler_publishes_sender_as_ret_addr():
-    raw_email = make_raw_email_bytes()
+    xlsx = make_xlsx_bytes(rows=[["col1"]])
+    raw_email = make_raw_email_bytes([("Unfilled Reqs.xlsx", xlsx)])
     event = make_csv_parser_event(sender="user@example.com")
 
     mock_s3 = mock_s3_get(raw_email)
