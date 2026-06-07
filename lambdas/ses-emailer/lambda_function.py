@@ -2,6 +2,7 @@ import json
 import os
 import boto3
 import logging
+from datetime import datetime
 from email.mime.multipart import MIMEMultipart
 from email.mime.text import MIMEText
 from email.mime.application import MIMEApplication
@@ -25,7 +26,7 @@ def download_file_from_s3(bucket, key, local_path="/tmp/report.xlsx"):
     return local_path
 
 
-def send_email_with_attachment(to_email, subject, body, file_path):
+def send_email_with_attachment(to_email, subject, body, file_path, filename=None):
     msg = MIMEMultipart()
     msg["Subject"] = subject
     msg["From"] = os.environ.get("SENDER_EMAIL")
@@ -41,7 +42,7 @@ def send_email_with_attachment(to_email, subject, body, file_path):
     part.add_header(
         "Content-Disposition",
         "attachment",
-        filename=file_path.split("/")[-1]
+        filename=filename or file_path.split("/")[-1]
     )
 
     msg.attach(part)
@@ -73,6 +74,9 @@ def lambda_handler(event, context):
     subject = "Pipeline Complete"
     body = "See attached file."
 
+    timestamp = datetime.now().strftime("%B %-d %Y %-I-%M %p")
+    attachment_name = f"ESF WF data file {timestamp}.xlsx"
+
     # 1. download from S3
     local_file = download_file_from_s3(bucket, key)
     logger.info(f"Downloaded file to {local_file}")
@@ -82,7 +86,8 @@ def lambda_handler(event, context):
         to_email=to_email,
         subject=subject,
         body=body,
-        file_path=local_file
+        file_path=local_file,
+        filename=attachment_name,
     )
     logger.info(f"Email sent: {response}")
 
