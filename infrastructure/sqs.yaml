@@ -94,6 +94,24 @@ Resources:
               ArnLike:
                 aws:SourceArn: !Sub arn:aws:sns:${AWS::Region}:${AWS::AccountId}:emailReceived${Env}
 
+  # Subscriptions are created here (not in sns.yaml) so both the SNS topic and the
+  # SQS queue exist before the subscription is registered. Creating a subscription
+  # to a non-existent queue leaves the topic in a pending state that causes SES to
+  # reject it with InvalidSnsTopic when the receipt rule is deployed.
+  EmailReceivedToCSVParserSubscription:
+    Type: AWS::SNS::Subscription
+    Properties:
+      TopicArn: !Sub arn:aws:sns:${AWS::Region}:${AWS::AccountId}:emailReceived${Env}
+      Protocol: sqs
+      Endpoint: !GetAtt CSVParserQueue.Arn
+
+  DataReceivedToRollCallSubscription:
+    Type: AWS::SNS::Subscription
+    Properties:
+      TopicArn: !Sub arn:aws:sns:${AWS::Region}:${AWS::AccountId}:dataReceived${Env}
+      Protocol: sqs
+      Endpoint: !GetAtt RollCallQueue.Arn
+
 Outputs:
   RollCallQueueArn:
     Value: !GetAtt RollCallQueue.Arn

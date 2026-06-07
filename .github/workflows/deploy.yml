@@ -268,12 +268,6 @@ jobs:
             --parameter-overrides Env="$ENV_SUFFIX" \
             --no-fail-on-empty-changeset
 
-      # Brief pause so the SNS topic policy (Principal: "*") has time to propagate
-      # before SES validates the topic for the receipt rule. Without this, a fresh
-      # create (after a full stack delete) hits InvalidSnsTopic intermittently.
-      - name: Wait for SNS policy propagation
-        run: sleep 15
-
       - name: Deploy SES receipt rules
         run: |
           aws cloudformation deploy \
