@@ -1,5 +1,32 @@
 # RollCall — User Guide
 
+## Table of Contents
+
+- [What RollCall Does](#what-rollcall-does)
+- [Prerequisites](#prerequisites)
+- [First-Time Setup](#first-time-setup)
+  - [Quick-Start Checklist](#quick-start-checklist)
+  - [Step 1 — Fill In Configuration Files](#step-1--fill-in-configuration-files)
+  - [Step 2 — GitHub Actions AWS Access](#step-2--github-actions-aws-access-aws-team-task)
+  - [Step 3 — Run the Deploy](#step-3--run-the-deploy)
+  - [Step 4 — Add DNS Records](#step-4--add-dns-records-dns-team-task)
+  - [Step 5 — Request SES Production Access](#step-5--request-ses-production-access-aws-support-task)
+  - [Step 6 — Test the Pipeline](#step-6--test-the-pipeline)
+- [Day-to-Day Operation](#day-to-day-operation)
+  - [Triggering a Run](#triggering-a-run)
+  - [Reading the Output Workbook](#reading-the-output-workbook)
+- [Failure Notifications](#failure-notifications)
+- [Carry-Forward Tracking](#carry-forward-tracking)
+- [GitHub Actions Workflows](#github-actions-workflows)
+  - [Deploy](#deploy)
+  - [Switch SES Receipt Rule Set](#switch-ses-receipt-rule-set)
+  - [Reset Seeding](#reset-seeding)
+  - [Delete Stack](#delete-stack)
+  - [Snapshot / Restore](#snapshot--restore)
+- [Troubleshooting](#troubleshooting)
+
+---
+
 ## What RollCall Does
 
 RollCall is an automated headcount reconciliation pipeline. Each week, you email a set of XLSX report exports to a pipeline address. Within minutes, the pipeline emails back a single combined output workbook that:
