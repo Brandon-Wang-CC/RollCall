@@ -640,6 +640,28 @@ OUTPUT_KEY  = "ESF WF data file.xlsx"
 # firing ses-emailer when rollcall-lambda refreshes the pipeline-internal reference copy.
 REF_KEY     = "ESF WF data file.ref"
 
+
+def _normalize_req(val):
+    """Normalize a Req # to a consistent string.
+
+    Pandas reads numeric Excel cells as float64, so integer req IDs written as
+    1234567 come back as 1234567.0 and stringify to "1234567.0".  This breaks
+    the isin() match against the current run's "1234567" values, causing rows
+    to be falsely carried forward or silently dropped.
+
+    Numeric-looking values are converted to int-strings ("1234567.0" → "1234567").
+    Non-numeric contractor IDs ("C1234", "CTRC-001") are returned unchanged.
+    """
+    if pd.isna(val):
+        return ""
+    s = str(val).strip()
+    if not s or s == "nan":
+        return ""
+    try:
+        return str(int(float(s)))
+    except (ValueError, TypeError):
+        return s
+
 # Master column order for the combined output
 MASTER_COLUMNS = [
     "Existing v New",
@@ -703,7 +725,7 @@ def write_output_workbook(crew_unfilled, crew_filled, contractor_unfilled, contr
             logger.info("No recognized sheet found — starting fresh")
             prev_df = pd.DataFrame(columns=MASTER_COLUMNS)
 
-        prev_df["Req #"] = prev_df["Req #"].astype(str).str.strip()
+        prev_df["Req #"] = prev_df["Req #"].map(_normalize_req)
         logger.info(f"Loaded {len(prev_df)} rows from previous run")
     except s3.exceptions.NoSuchKey:
         # Fresh deploy — bootstrap from the static ref file (Reqs sheet) if it exists
@@ -714,7 +736,7 @@ def write_output_workbook(crew_unfilled, crew_filled, contractor_unfilled, contr
             xl = pd.ExcelFile(esf_bytes)
             if "Reqs" in xl.sheet_names:
                 prev_df = pd.read_excel(xl, sheet_name="Reqs")
-                prev_df["Req #"] = prev_df["Req #"].astype(str).str.strip()
+                prev_df["Req #"] = prev_df["Req #"].map(_normalize_req)
                 logger.info("Bootstrapped %d rows from %s Reqs sheet", len(prev_df), ESF_WF_FILE)
             else:
                 logger.info("No Reqs sheet in bootstrap file — starting fresh")
@@ -730,7 +752,7 @@ def write_output_workbook(crew_unfilled, crew_filled, contractor_unfilled, contr
         standardize_df(contractor_unfilled),
         standardize_df(contractor_filled),
     ], ignore_index=True)
-    new_df["Req #"] = new_df["Req #"].astype(str).str.strip()
+    new_df["Req #"] = new_df["Req #"].map(_normalize_req)
     logger.info(f"New data: {len(new_df)} rows")
 
     # Step 3 — merge: new data takes precedence; rows no longer in reports are carried forward
