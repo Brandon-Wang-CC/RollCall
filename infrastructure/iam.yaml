@@ -38,6 +38,15 @@ Resources:
       ManagedPolicyArns:
         - arn:aws:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole
       Policies:
+        - PolicyName: SES-sendEmail
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Effect: Allow
+                Action: ses:SendEmail
+                Resource:
+                  - !Sub arn:aws:ses:${AWS::Region}:${AWS::AccountId}:identity/${SenderDomain}
+                  - !Sub arn:aws:ses:${AWS::Region}:${AWS::AccountId}:identity/*
         - PolicyName: SNSANDS3
           PolicyDocument:
             Version: '2012-10-17'
@@ -114,7 +123,9 @@ Resources:
                 Action:
                   - ses:SendEmail
                   - ses:SendRawEmail
-                Resource: !Sub arn:aws:ses:${AWS::Region}:${AWS::AccountId}:identity/${SenderDomain}
+                Resource:
+                  - !Sub arn:aws:ses:${AWS::Region}:${AWS::AccountId}:identity/${SenderDomain}
+                  - !Sub arn:aws:ses:${AWS::Region}:${AWS::AccountId}:identity/*
         - PolicyName: Lambda-invoke-ses-emailer-function
           PolicyDocument:
             Version: '2012-10-17'

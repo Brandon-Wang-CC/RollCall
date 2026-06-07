@@ -741,39 +741,69 @@ def write_output_workbook(crew_unfilled, crew_filled, contractor_unfilled, contr
 
     return output_path
 
+def _notify_failure(ret_addr, error_msg):
+    if not ret_addr:
+        logger.warning("Cannot send failure notification — return address not yet known")
+        return
+    try:
+        boto3.client("ses").send_email(
+            Source=os.environ.get("SENDER_EMAIL", ""),
+            Destination={"ToAddresses": [ret_addr]},
+            Message={
+                "Subject": {"Data": "RollCall pipeline error"},
+                "Body": {"Text": {"Data": (
+                    f"Your RollCall pipeline run failed in rollcall-lambda.\n\n"
+                    f"Error: {error_msg}\n\n"
+                    f"Check CloudWatch logs (/aws/lambda/rollcall-lambda) for full details."
+                )}},
+            },
+        )
+        logger.info("Failure notification sent to %s", ret_addr)
+    except Exception as e:
+        logger.error("Could not send failure notification to %s: %s", ret_addr, e)
+
+
 def lambda_handler(event, context):
     start = time.time()
     logger.info("Lambda handler invoked")
     logger.info(f"Event: {json.dumps(event, indent=2)}")
-    ret_addr = json.loads(json.loads(event["Records"][0].get("body", "{}")).get("Message", "{}")).get("retAddr")
-    logger.info(f"Return address (output folder): {ret_addr}")
-    discovered  = discover_files(BUCKET_NAME)
-    local_files = download_all_files(BUCKET_NAME, discovered)
-    filtered    = filter_all_files(local_files)
 
-    dept_codes = load_dept_codes(DEPTS_BUCKET, CC_ID_FILE)
-    filtered["candidates"] = filter_candidates(local_files["candidates"], dept_codes)
+    ret_addr = None
+    try:
+        ret_addr = json.loads(json.loads(event["Records"][0].get("body", "{}")).get("Message", "{}")).get("retAddr")
+        logger.info(f"Return address (output folder): {ret_addr}")
+        discovered  = discover_files(BUCKET_NAME)
+        local_files = download_all_files(BUCKET_NAME, discovered)
+        filtered    = filter_all_files(local_files)
 
-    ref = load_reference_data(DEPTS_BUCKET)
+        dept_codes = load_dept_codes(DEPTS_BUCKET, CC_ID_FILE)
+        filtered["candidates"] = filter_candidates(local_files["candidates"], dept_codes)
 
-    crew_unfilled       = build_crew_unfilled(filtered, ref)
-    crew_filled         = build_crew_filled(filtered, ref)
-    contractor_unfilled = build_contractor_unfilled(filtered, ref)
-    contractor_filled   = build_contractor_filled(filtered, ref)
+        ref = load_reference_data(DEPTS_BUCKET)
 
-    output_path = write_output_workbook(
-        crew_unfilled, crew_filled, contractor_unfilled, contractor_filled, ret_addr
-    )
+        crew_unfilled       = build_crew_unfilled(filtered, ref)
+        crew_filled         = build_crew_filled(filtered, ref)
+        contractor_unfilled = build_contractor_unfilled(filtered, ref)
+        contractor_filled   = build_contractor_filled(filtered, ref)
 
-    elapsed = time.time() - start
-    logger.info(f"Process complete in {elapsed:.2f}s. Output written to: {output_path}")
-    return {
-        "statusCode": 200,
-        "status": "success",
-        "body": json.dumps({
-            "message": "Headcount reconciliation complete",
-            "retAddr": ret_addr,
-            "bucket": DEPTS_BUCKET,
-            "key": OUTPUT_KEY
-        })
-    }
+        output_path = write_output_workbook(
+            crew_unfilled, crew_filled, contractor_unfilled, contractor_filled, ret_addr
+        )
+
+        elapsed = time.time() - start
+        logger.info(f"Process complete in {elapsed:.2f}s. Output written to: {output_path}")
+        return {
+            "statusCode": 200,
+            "status": "success",
+            "body": json.dumps({
+                "message": "Headcount reconciliation complete",
+                "retAddr": ret_addr,
+                "bucket": DEPTS_BUCKET,
+                "key": OUTPUT_KEY
+            })
+        }
+
+    except Exception as e:
+        logger.error("Unhandled exception: %s", e, exc_info=True)
+        _notify_failure(ret_addr, str(e))
+        raise

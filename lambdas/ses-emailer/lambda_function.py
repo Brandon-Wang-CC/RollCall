@@ -16,6 +16,28 @@ logger = logging.getLogger()
 logger.setLevel(logging.INFO)
 
 
+def _notify_failure(to_email, error_msg):
+    if not to_email:
+        logger.warning("Cannot send failure notification — recipient email not yet known")
+        return
+    try:
+        ses.send_email(
+            Source=os.environ.get("SENDER_EMAIL", ""),
+            Destination={"ToAddresses": [to_email]},
+            Message={
+                "Subject": {"Data": "RollCall pipeline error"},
+                "Body": {"Text": {"Data": (
+                    f"Your RollCall pipeline run failed in ses-emailer.\n\n"
+                    f"Error: {error_msg}\n\n"
+                    f"Check CloudWatch logs (/aws/lambda/ses-emailer-function) for full details."
+                )}},
+            },
+        )
+        logger.info("Failure notification sent to %s", to_email)
+    except Exception as e:
+        logger.error("Could not send failure notification to %s: %s", to_email, e)
+
+
 def parse_event(event):
     record = event["Records"][0]
     body = record.get("body")
@@ -61,46 +83,53 @@ def lambda_handler(event, context):
     logger.info(f"Event: {json.dumps(event, indent=2)}")
     logger.info(f"SENDER_EMAIL: {os.environ.get('SENDER_EMAIL')}")
 
-    record = event["Records"][0]
+    to_email = None
+    try:
+        record = event["Records"][0]
 
-    bucket = record["s3"]["bucket"]["name"]
-    key = record["s3"]["object"]["key"]
+        bucket = record["s3"]["bucket"]["name"]
+        key = record["s3"]["object"]["key"]
 
-    # S3 event notifications encode special chars (e.g. @ → %40) in object keys
-    key = urllib.parse.unquote_plus(key)
+        # S3 event notifications encode special chars (e.g. @ → %40) in object keys
+        key = urllib.parse.unquote_plus(key)
 
-    if "/" not in key:
-        logger.info(f"Skipping non-output key (no email prefix): {key}")
-        return {"statusCode": 200, "body": json.dumps({"skipped": key})}
+        if "/" not in key:
+            logger.info(f"Skipping non-output key (no email prefix): {key}")
+            return {"statusCode": 200, "body": json.dumps({"skipped": key})}
 
-    to_email = key.split("/")[0]
-    file_key = key.split("/")[1]
+        to_email = key.split("/")[0]
+        file_key = key.split("/")[1]
 
-    logger.info(f"Recipient: {to_email} | File: {file_key} | Source: s3://{bucket}/{key}")
+        logger.info(f"Recipient: {to_email} | File: {file_key} | Source: s3://{bucket}/{key}")
 
-    subject = "Pipeline Complete"
-    body = "See attached file."
+        subject = "Pipeline Complete"
+        body = "See attached file."
 
-    timestamp = datetime.now().strftime("%B %-d %Y %-I-%M %p")
-    attachment_name = f"ESF WF data file {timestamp}.xlsx"
+        timestamp = datetime.now().strftime("%B %-d %Y %-I-%M %p")
+        attachment_name = f"ESF WF data file {timestamp}.xlsx"
 
-    local_file = download_file_from_s3(bucket, key)
-    response = send_email_with_attachment(
-        to_email=to_email,
-        subject=subject,
-        body=body,
-        file_path=local_file,
-        filename=attachment_name,
-    )
-    elapsed = time.time() - start
-    logger.info(f"Email sent to {to_email} | SES MessageId: {response['MessageId']} | elapsed: {elapsed:.2f}s")
+        local_file = download_file_from_s3(bucket, key)
+        response = send_email_with_attachment(
+            to_email=to_email,
+            subject=subject,
+            body=body,
+            file_path=local_file,
+            filename=attachment_name,
+        )
+        elapsed = time.time() - start
+        logger.info(f"Email sent to {to_email} | SES MessageId: {response['MessageId']} | elapsed: {elapsed:.2f}s")
 
-    return {
-        "statusCode": 200,
-        "body": json.dumps({
-            "message": "Email sent successfully",
-            "to": to_email,
-            "s3": f"s3://{bucket}/{key}",
-            "sesMessageId": response["MessageId"]
-        })
-    }
+        return {
+            "statusCode": 200,
+            "body": json.dumps({
+                "message": "Email sent successfully",
+                "to": to_email,
+                "s3": f"s3://{bucket}/{key}",
+                "sesMessageId": response["MessageId"]
+            })
+        }
+
+    except Exception as e:
+        logger.error("Unhandled exception: %s", e, exc_info=True)
+        _notify_failure(to_email, str(e))
+        raise

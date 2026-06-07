@@ -265,7 +265,7 @@ jobs:
             --region $AWS_REGION \
             --resolve-s3 \
             --capabilities CAPABILITY_NAMED_IAM \
-            --parameter-overrides CsvBucket=$CSV_BUCKET Env="$ENV_SUFFIX" \
+            --parameter-overrides CsvBucket=$CSV_BUCKET SenderEmail=$SENDER_EMAIL Env="$ENV_SUFFIX" \
             --no-confirm-changeset \
             --no-fail-on-empty-changeset
 
@@ -290,6 +290,7 @@ jobs:
               f'FilePrefixContractorClosed={enc(settings["FilePrefixContractorClosed"])}',
               f'FilePrefixCandidates={enc(settings["FilePrefixCandidates"])}',
               f'MD1Name={enc(settings["MD1Name"])}',
+              f'SenderEmail={os.environ["SENDER_EMAIL"]}',
               f'Env={os.environ["ENV_SUFFIX"]}',
             '--no-confirm-changeset',
             '--no-fail-on-empty-changeset',

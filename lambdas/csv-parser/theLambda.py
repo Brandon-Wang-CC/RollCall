@@ -200,6 +200,28 @@ def _get_object_with_retry(bucket, key, max_retries=3):
                 raise
 
 
+def _notify_failure(sender_email, error_msg):
+    if not sender_email:
+        logger.warning("Cannot send failure notification — sender email not yet known")
+        return
+    try:
+        boto3.client("ses").send_email(
+            Source=os.environ.get("SENDER_EMAIL", ""),
+            Destination={"ToAddresses": [sender_email]},
+            Message={
+                "Subject": {"Data": "RollCall pipeline error"},
+                "Body": {"Text": {"Data": (
+                    f"Your RollCall pipeline run failed in csvParser.\n\n"
+                    f"Error: {error_msg}\n\n"
+                    f"Check CloudWatch logs (/aws/lambda/csvParser) for full details."
+                )}},
+            },
+        )
+        logger.info("Failure notification sent to %s", sender_email)
+    except Exception as e:
+        logger.error("Could not send failure notification to %s: %s", sender_email, e)
+
+
 def wipe_buckets():
     s3_resource = boto3.resource("s3")
     bucket = s3_resource.Bucket(CSV_BUCKET)
@@ -213,59 +235,66 @@ def lambda_handler(event, context):
     start = time.time()
     logger.info(f"Event received: {json.dumps(event, indent=2)}")
 
-    wipe_buckets()
+    sender_email = None
+    try:
+        wipe_buckets()
 
-    sender_email = json.loads(json.loads(event["Records"][0]["body"])["Message"])["mail"]["source"]
-    logger.info(f"Email source detected: {sender_email}")
+        sender_email = json.loads(json.loads(event["Records"][0]["body"])["Message"])["mail"]["source"]
+        logger.info(f"Email source detected: {sender_email}")
 
-    BLOCKED_SENDERS = {"no-reply-aws@amazon.com"}
-    if sender_email in BLOCKED_SENDERS:
-        logger.info(f"Ignoring email from blocked sender: {sender_email}")
-        return {"status": "ignored", "reason": "blocked sender"}
+        BLOCKED_SENDERS = {"no-reply-aws@amazon.com"}
+        if sender_email in BLOCKED_SENDERS:
+            logger.info(f"Ignoring email from blocked sender: {sender_email}")
+            return {"status": "ignored", "reason": "blocked sender"}
 
-    total_files = 0
-    processed_files = []
+        total_files = 0
+        processed_files = []
 
-    for record in event.get("Records", []):
-        sns_message = record["body"]
-        message = json.loads(sns_message)["Message"]
-        mail_obj = json.loads(message)
+        for record in event.get("Records", []):
+            sns_message = record["body"]
+            message = json.loads(sns_message)["Message"]
+            mail_obj = json.loads(message)
 
-        s3_info = mail_obj["receipt"]["action"]
-        bucket_name = s3_info["bucketName"]
-        object_key = s3_info["objectKey"]
+            s3_info = mail_obj["receipt"]["action"]
+            bucket_name = s3_info["bucketName"]
+            object_key = s3_info["objectKey"]
 
-        logger.info("Processing email: %s/%s", bucket_name, object_key)
+            logger.info("Processing email: %s/%s", bucket_name, object_key)
 
-        email_obj = _get_object_with_retry(bucket_name, object_key)
-        msg = email.message_from_binary_file(email_obj["Body"])
+            email_obj = _get_object_with_retry(bucket_name, object_key)
+            msg = email.message_from_binary_file(email_obj["Body"])
 
-        for part in msg.walk():
-            if "attachment" not in part.get("Content-Disposition", ""):
-                continue
-            if part.get_content_maintype() == "multipart":
-                continue
+            for part in msg.walk():
+                if "attachment" not in part.get("Content-Disposition", ""):
+                    continue
+                if part.get_content_maintype() == "multipart":
+                    continue
 
-            filename = part.get_filename()
-            if not filename:
-                logger.info("Skipping attachment part with no filename (Content-Type: %s)", part.get_content_type())
-                continue
+                filename = part.get_filename()
+                if not filename:
+                    logger.info("Skipping attachment part with no filename (Content-Type: %s)", part.get_content_type())
+                    continue
 
-            file_content = part.get_payload(decode=True)
-            total_files += 1
+                file_content = part.get_payload(decode=True)
+                total_files += 1
 
-            results = process_file(filename, file_content)
-            processed_files.extend(results)
+                results = process_file(filename, file_content)
+                processed_files.extend(results)
 
-            del file_content
+                del file_content
 
-    logger.info("Processed %d/%d files: %s", len(processed_files), total_files, processed_files)
-    publish_to_sns(sender_email)
+        logger.info("Processed %d/%d files: %s", len(processed_files), total_files, processed_files)
+        publish_to_sns(sender_email)
 
-    elapsed = time.time() - start
-    logger.info("Handler complete in %.2fs", elapsed)
-    return {
-        "status": "success",
-        "processed_files": processed_files,
-        "total_files": total_files
-    }
+        elapsed = time.time() - start
+        logger.info("Handler complete in %.2fs", elapsed)
+        return {
+            "status": "success",
+            "processed_files": processed_files,
+            "total_files": total_files
+        }
+
+    except Exception as e:
+        logger.error("Unhandled exception: %s", e, exc_info=True)
+        _notify_failure(sender_email, str(e))
+        raise
