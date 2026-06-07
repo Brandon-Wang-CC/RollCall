@@ -194,7 +194,7 @@ def publish_to_sns(ret_addr: str, orig_message_id: str = "", orig_subject: str =
     logger.info("Published SNS message: %s", response["MessageId"])
 
 
-def _send_failure_email(to_email, subject_ref="", error_msg="", orig_message_id=""):
+def _send_failure_email(to_email, subject_ref="", error_msg="", orig_message_id="", source=""):
     if not to_email or not SENDER_EMAIL:
         logger.warning("Cannot send failure notification — sender or recipient email not configured")
         return
@@ -216,6 +216,8 @@ def _send_failure_email(to_email, subject_ref="", error_msg="", orig_message_id=
             "Please check that all required report files are attached and resubmit. "
             "If the problem continues, contact your administrator."
         )
+        if source:
+            body += f"\n\nFailed in: {source}"
 
         msg = email.mime.text.MIMEText(body, "plain")
         msg["Subject"] = subject
@@ -344,5 +346,5 @@ def lambda_handler(event, context):
 
     except Exception as e:
         logger.error("Unhandled exception: %s", e, exc_info=True)
-        _send_failure_email(sender_email, orig_subject, error_msg=str(e), orig_message_id=orig_message_id)
+        _send_failure_email(sender_email, orig_subject, error_msg=str(e), orig_message_id=orig_message_id, source=context.function_name)
         raise
