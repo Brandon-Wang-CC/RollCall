@@ -12,6 +12,7 @@ on:
         options:
           - test
           - prod
+          - eng
 
 permissions:
   id-token: write
