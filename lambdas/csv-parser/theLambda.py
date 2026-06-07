@@ -174,13 +174,15 @@ def parse_csv_to_rows(csv_bytes):
 
 
 
-def publish_to_sns(object_key: str):
+def publish_to_sns(object_key: str, orig_message_id: str = "", orig_subject: str = ""):
     topic_arn = os.environ.get("SNS_TOPIC_ARN")
 
     message = {
         "status": "processed",
         "bucket": CSV_BUCKET,
-        "retAddr": object_key
+        "retAddr": object_key,
+        "origMessageId": orig_message_id,
+        "origSubject": orig_subject,
     }
 
     try:
@@ -226,8 +228,12 @@ def lambda_handler(event, context):
 
     wipe_buckets()
 
-    sender_email = json.loads(json.loads(event["Records"][0]["body"])["Message"])["mail"]["source"]
-    logger.info(f"Email source detected: {sender_email}")
+    first_msg = json.loads(json.loads(event["Records"][0]["body"])["Message"])
+    sender_email = first_msg["mail"]["source"]
+    common_headers = first_msg.get("mail", {}).get("commonHeaders", {})
+    orig_message_id = common_headers.get("messageId", "")
+    orig_subject    = common_headers.get("subject", "")
+    logger.info("Email source: %s | orig messageId: %s | subject: %s", sender_email, orig_message_id, orig_subject)
 
     BLOCKED_SENDERS = {"no-reply-aws@amazon.com"}
     if sender_email in BLOCKED_SENDERS:
@@ -285,7 +291,7 @@ def lambda_handler(event, context):
     if missing:
         raise ValueError(f"Email is missing required attachments: {'; '.join(missing)}")
 
-    publish_to_sns(sender_email)
+    publish_to_sns(sender_email, orig_message_id, orig_subject)
 
     elapsed = time.time() - start
     logger.info("Handler complete in %.2fs", elapsed)

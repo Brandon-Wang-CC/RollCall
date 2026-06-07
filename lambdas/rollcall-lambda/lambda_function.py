@@ -703,7 +703,7 @@ def standardize_df(df):
             df[col] = ""
     return df[MASTER_COLUMNS]
 
-def write_output_workbook(crew_unfilled, crew_filled, contractor_unfilled, contractor_filled, ret_addr):
+def write_output_workbook(crew_unfilled, crew_filled, contractor_unfilled, contractor_filled, ret_addr, ref=None, orig_message_id="", orig_subject=""):
     logger.info("Writing output workbook...")
     output_path = os.path.join(TMP_DIR, OUTPUT_FILE)
 
@@ -775,7 +775,11 @@ def write_output_workbook(crew_unfilled, crew_filled, contractor_unfilled, contr
 
     logger.info(f"Output workbook written to '{output_path}'")
     key = f"{ret_addr}/{OUTPUT_KEY}"
-    s3.upload_file(output_path, DEPTS_BUCKET, key)
+    s3_meta = {k: v for k, v in {
+        "original-message-id": orig_message_id,
+        "original-subject":    orig_subject[:500],  # S3 metadata value limit is 2 KB total
+    }.items() if v}
+    s3.upload_file(output_path, DEPTS_BUCKET, key, ExtraArgs={"Metadata": s3_meta} if s3_meta else {})
     logger.info(f"Uploaded output to s3://{DEPTS_BUCKET}/{key}")
 
     s3.upload_file(output_path, DEPTS_BUCKET, REF_KEY)
@@ -787,8 +791,11 @@ def lambda_handler(event, context):
     start = time.time()
     logger.info("Lambda handler invoked")
     logger.info(f"Event: {json.dumps(event, indent=2)}")
-    ret_addr = json.loads(json.loads(event["Records"][0].get("body", "{}")).get("Message", "{}")).get("retAddr")
-    logger.info(f"Return address (output folder): {ret_addr}")
+    sns_payload = json.loads(json.loads(event["Records"][0].get("body", "{}")).get("Message", "{}"))
+    ret_addr        = sns_payload.get("retAddr")
+    orig_message_id = sns_payload.get("origMessageId", "")
+    orig_subject    = sns_payload.get("origSubject", "")
+    logger.info("Return address: %s | origMessageId: %s | origSubject: %s", ret_addr, orig_message_id, orig_subject)
     discovered  = discover_files(BUCKET_NAME)
     local_files = download_all_files(BUCKET_NAME, discovered)
     filtered    = filter_all_files(local_files)
@@ -804,7 +811,8 @@ def lambda_handler(event, context):
     contractor_filled   = build_contractor_filled(filtered, ref)
 
     output_path = write_output_workbook(
-        crew_unfilled, crew_filled, contractor_unfilled, contractor_filled, ret_addr
+        crew_unfilled, crew_filled, contractor_unfilled, contractor_filled, ret_addr,
+        ref=ref, orig_message_id=orig_message_id, orig_subject=orig_subject,
     )
 
     elapsed = time.time() - start
