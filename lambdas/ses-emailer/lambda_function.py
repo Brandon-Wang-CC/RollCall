@@ -30,11 +30,14 @@ def download_file_from_s3(bucket, key, local_path="/tmp/report.xlsx"):
     return local_path
 
 
-def send_email_with_attachment(to_email, subject, body, file_path, filename=None):
+def send_email_with_attachment(to_email, subject, body, file_path, filename=None, in_reply_to=None, references=None):
     msg = MIMEMultipart()
     msg["Subject"] = subject
     msg["From"] = os.environ.get("SENDER_EMAIL")
     msg["To"] = to_email
+    if in_reply_to:
+        msg["In-Reply-To"] = in_reply_to
+        msg["References"] = references or in_reply_to
 
     msg.attach(MIMEText(body, "plain"))
 
@@ -78,8 +81,25 @@ def lambda_handler(event, context):
 
     logger.info(f"Recipient: {to_email} | File: {file_key} | Source: s3://{bucket}/{key}")
 
-    subject = "Pipeline Complete"
-    body = "See attached file."
+    head = s3.head_object(Bucket=bucket, Key=key)
+    obj_meta        = head.get("Metadata", {})
+    orig_message_id = obj_meta.get("original-message-id", "")
+    orig_subject    = obj_meta.get("original-subject", "")
+
+    if orig_subject:
+        prefix = "RE: " if not orig_subject.upper().startswith("RE:") else ""
+        subject = f"{prefix}{orig_subject}"
+    else:
+        subject = "Headcount Reconciliation Complete"
+
+    body = (
+        "Please find your updated ES&F headcount reconciliation workbook attached.\n\n"
+        "This report was generated automatically from the files included in your "
+        "most recent submission. It consolidates open and filled requisitions across "
+        "crew and contractor categories, and carries forward any positions from the "
+        "previous reporting period that are no longer present in the current reports.\n\n"
+        "No action is required unless corrections are needed."
+    )
 
     timestamp = datetime.now().strftime("%B %-d %Y %-I-%M %p")
     attachment_name = f"ESF WF data file {timestamp}.xlsx"
@@ -91,6 +111,7 @@ def lambda_handler(event, context):
         body=body,
         file_path=local_file,
         filename=attachment_name,
+        in_reply_to=orig_message_id or None,
     )
     elapsed = time.time() - start
     logger.info(f"Email sent to {to_email} | SES MessageId: {response['MessageId']} | elapsed: {elapsed:.2f}s")
