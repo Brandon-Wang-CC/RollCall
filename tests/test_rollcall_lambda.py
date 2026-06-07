@@ -19,8 +19,8 @@ rollcall = load_module("rollcall", "lambdas/rollcall-lambda/lambda_function.py")
 def make_ref(req_nums=None, cc_map=None, dept_map=None):
     """Minimal reference data for build_* functions."""
     req_nums = req_nums or []
-    cc_map = cc_map or {1001: "IT Security"}
-    dept_map = dept_map or {"IT Security": "CTO Office"}
+    cc_map = cc_map or {1001: "Test Department"}
+    dept_map = dept_map or {"Test Department": "Test Division"}
 
     _ESF_COLS = ["Req #", "Job Code", "Job Profile", "Comment", "Hire Name", "Start Date"]
     esf_reqs = pd.DataFrame(
@@ -36,10 +36,10 @@ def make_ref(req_nums=None, cc_map=None, dept_map=None):
         [{"department": k, "MD-2": v} for k, v in dept_map.items()]
     )
     status = pd.DataFrame([
-        {"status": "Offer",                "short status": "OFR"},
-        {"status": "Ready for Hire",       "short status": "RFH"},
-        {"status": "Employment Agreement", "short status": "EA"},
-        {"status": "Background Check",     "short status": "BGC"},
+        {"status": "Offer",                "short status": "ST1"},
+        {"status": "Ready for Hire",       "short status": "ST2"},
+        {"status": "Employment Agreement", "short status": "ST3"},
+        {"status": "Background Check",     "short status": "ST4"},
     ])
     esf_all = pd.DataFrame(columns=["Manager Name", "Department"])
     return {"cc_id": cc_id, "depts": depts, "status": status,
@@ -126,7 +126,7 @@ def test_build_crew_unfilled_new_req():
         "Number of Openings Total": 1,
         "ID": "JC001",
         "Job Profile Name": "Engineer",
-        "State": "PA",
+        "State": "NY",
         "Job Requisition Primary Location (Building)": "HQ",
         "Job Requisition Additional Locations": "",
     }])
@@ -140,8 +140,8 @@ def test_build_crew_unfilled_new_req():
 
     assert len(result) == 1
     assert result.iloc[0]["Existing v New"] == "NEW"
-    assert result.iloc[0]["Department"] == "IT Security"
-    assert result.iloc[0]["MD-2"] == "CTO Office"
+    assert result.iloc[0]["Department"] == "Test Department"
+    assert result.iloc[0]["MD-2"] == "Test Division"
     assert result.iloc[0]["Management Type"] == "Non Management"
 
 
@@ -155,7 +155,7 @@ def test_build_crew_unfilled_existing_req():
         "Number of Openings Total": 1,
         "ID": "JC999",
         "Job Profile Name": "Director",
-        "State": "TX",
+        "State": "NY",
         "Job Requisition Primary Location (Building)": "",
         "Job Requisition Additional Locations": "",
     }])
@@ -181,12 +181,12 @@ def test_build_crew_unfilled_hire_name_lookup():
         "Number of Openings Total": 1,
         "ID": "JC001",
         "Job Profile Name": "Engineer",
-        "State": "PA",
+        "State": "NY",
         "Job Requisition Primary Location (Building)": "",
         "Job Requisition Additional Locations": "",
     }])
     candidates = pd.DataFrame([{
-        "Job Requisition": "1234567-SWE",
+        "Job Requisition": "1234567-R01",
         "Candidate Name": "Jane Smith",
         "Candidate Status": "Ready for Hire",
         "Cost Center": "1001",
@@ -214,16 +214,16 @@ def test_build_crew_filled_filters_by_status_and_date():
     today = pd.Timestamp.today()
     candidates = pd.DataFrame([
         # Should be included: req in esf_reqs, right status, recent start date
-        {"Job Requisition": "1234567-ENG", "Candidate Name": "Alice",
+        {"Job Requisition": "1234567-R01", "Candidate Name": "Alice",
          "Candidate Status": "Offer", "Candidate Start Date": today,
          "Cost Center": "1001", "Grade": "P3",
-         "Hiring Manager": "Bob", "State": "PA",
+         "Hiring Manager": "Bob", "State": "NY",
          "Job Requisition Primary Location": "HQ"},
         # Should be excluded: status not in target list
-        {"Job Requisition": "1234567-ENG", "Candidate Name": "Excluded",
+        {"Job Requisition": "1234567-R01", "Candidate Name": "Excluded",
          "Candidate Status": "Rejected", "Candidate Start Date": today,
          "Cost Center": "1001", "Grade": "P3",
-         "Hiring Manager": "Bob", "State": "PA",
+         "Hiring Manager": "Bob", "State": "NY",
          "Job Requisition Primary Location": "HQ"},
     ])
     filtered = {"candidates": candidates}

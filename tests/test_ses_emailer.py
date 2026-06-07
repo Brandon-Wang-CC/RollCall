@@ -80,7 +80,7 @@ def test_lambda_handler_decodes_percent_encoded_at_sign():
         return "/tmp/fake.xlsx"
 
     event = make_ses_emailer_event(
-        key="user%40example.com/ESF+WF+data.xlsx",
+        key="user%40example.com/report+data.xlsx",
         bucket="test-depts",
     )
 
@@ -90,7 +90,7 @@ def test_lambda_handler_decodes_percent_encoded_at_sign():
          patch.dict(os.environ, {"SENDER_EMAIL": "noreply@example.com"}):
         ses_emailer.lambda_handler(event, {})
 
-    assert captured["key"] == "user@example.com/ESF WF data.xlsx"
+    assert captured["key"] == "user@example.com/report data.xlsx"
 
 
 def test_lambda_handler_extracts_recipient_from_key_prefix():
@@ -101,7 +101,7 @@ def test_lambda_handler_extracts_recipient_from_key_prefix():
         return {"MessageId": "msg-2"}
 
     event = make_ses_emailer_event(
-        key="tyler%40corp.com/output.xlsx",
+        key="testuser%40corp.com/output.xlsx",
         bucket="test-depts",
     )
 
@@ -110,7 +110,7 @@ def test_lambda_handler_extracts_recipient_from_key_prefix():
          patch.dict(os.environ, {"SENDER_EMAIL": "noreply@example.com"}):
         ses_emailer.lambda_handler(event, {})
 
-    assert captured["to_email"] == "tyler@corp.com"
+    assert captured["to_email"] == "testuser@corp.com"
 
 
 # ── lambda_handler — key without slash ───────────────────────────────────────
