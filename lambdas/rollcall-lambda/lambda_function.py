@@ -637,7 +637,7 @@ def build_contractor_filled(filtered, ref):
         state = {"PA": "Pennsylvania", "TX": "Texas"}.get(loc, loc)
 
         rows.append({
-            "Existing v New":                              "",
+            "Existing v New":                              "Filled",
             "Status":                                      col_a_status,
             "Department":                                  department,
             "Worker Type":                                 "Contractor" if cost_center else "",

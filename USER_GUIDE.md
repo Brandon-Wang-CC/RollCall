@@ -228,7 +228,7 @@ The output workbook contains a single **Output** sheet with all requisitions fro
 | `Update` | Crew Filled | Hire name changed since the last ESF WF reference snapshot |
 | `Update Date` | Crew Filled | Start date changed since the last ESF WF reference snapshot |
 | `Open` | Contractor Unfilled | Req is in the ESF WF reference but no hire name recorded yet |
-| `Filled` | Contractor Unfilled | Req is in the ESF WF reference and a hire name is present |
+| `Filled` | Contractor Unfilled, Contractor Filled | Req is in the ESF WF reference and a hire name is present; all contractor closed/filled rows |
 | `Carried Forward` | All row types | Req was in the previous run's output but absent from this run's reports — retained so it does not silently disappear |
 
 ---
