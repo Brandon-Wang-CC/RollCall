@@ -358,10 +358,19 @@ def build_crew_filled(filtered, ref):
             esf_hire    = esf_row.get("Hire Name", "")
             esf_start   = esf_row.get("Start Date", "")
 
-            # "Update" if hire name or start date changed since the last ESF snapshot
+            # "Update" if hire name or start date changed since the last ESF snapshot.
+            # Normalize both sides to date objects before comparing to avoid false
+            # positives from Timestamp vs. float serial-number serialization differences.
+            def _to_date(v):
+                try:
+                    ts = pd.to_datetime(v, errors="coerce")
+                    return ts.date() if not pd.isna(ts) else None
+                except Exception:
+                    return None
+
             if str(esf_hire) != str(hire_name):
                 existing_v_new = "Update"
-            elif str(esf_start) != str(start_date):
+            elif _to_date(esf_start) != _to_date(start_date):
                 existing_v_new = "Update Date"
             else:
                 existing_v_new = "Existing"
@@ -460,10 +469,18 @@ def build_contractor_unfilled(filtered, ref):
                 md2_match = depts[depts["department"] == department]
                 md2 = md2_match.iloc[0]["MD-2"] if not md2_match.empty else ""
 
+            # Match original formula: NEW / Open / Filled (three states)
+            # "Open" = in ESF Reqs but no hire name recorded yet
+            # "Filled" = in ESF Reqs with a hire name
             if req_num_str not in req_exists_set and req_num_str not in prev_req_nums:
                 existing_v_new = "NEW"
             else:
-                existing_v_new = "Existing"
+                esf_hire_val = ""
+                if req_num_str in req_exists_set:
+                    esf_row_match = esf_reqs[esf_reqs["Req #"] == req_num_str]
+                    if not esf_row_match.empty and "Hire Name" in esf_reqs.columns:
+                        esf_hire_val = str(esf_row_match.iloc[0].get("Hire Name", "")).strip()
+                existing_v_new = "Filled" if esf_hire_val and esf_hire_val.lower() != "nan" else "Open"
 
             loc = str(row.get("LOC", "")).strip()
             state = {"PA": "Pennsylvania", "TX": "Texas"}.get(loc, loc)
@@ -526,11 +543,13 @@ def build_contractor_filled(filtered, ref):
 
     # Apply filters:
     # Start Date >= NOW()-10, Filled/Cancelled = "F" (case-insensitive)
+    # Exclude the sentinel value "9/31/2022" (invalid date used as placeholder in source data)
     cutoff_date = pd.Timestamp.today() - pd.Timedelta(days=10)
     df["Start Date"] = pd.to_datetime(df["Start Date"], errors="coerce")
     df = df[
         (df["Start Date"] >= cutoff_date) &
-        (df[filled_col].astype(str).str.upper().str.strip() == "F")
+        (df[filled_col].astype(str).str.upper().str.strip() == "F") &
+        (df["Start Date"].notna())
     ].copy()
 
     # Status mapping
@@ -624,7 +643,7 @@ def build_contractor_filled(filtered, ref):
             "Department":                                  department,
             "Worker Type":                                 "Contractor" if cost_center else "",
             "Job Code":                                    "",
-            "Job Profile":                                 row.get("Job Tile (Standardized)", ""),
+            "Job Profile":                                 row.get("Job Title (Standardized)", ""),
             "Cost Center ID":                              cost_center,
             "Grade Level":                                 row.get("Grade Level", ""),
             "Management":                                  row.get("Management", ""),
