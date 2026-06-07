@@ -64,7 +64,7 @@ jobs:
   # ── Runs only after both parallel jobs pass ───────────────────────────────────
 
   build:
-    name: SAM build
+    name: Lambda build
     needs: [test, validate]
     runs-on: ubuntu-latest
 
@@ -76,7 +76,7 @@ jobs:
         with:
           use-installer: true
 
-      - name: SAM build
+      - name: Lambda build
         run: |
           sam build --template lambdas/csv-parser/template.yaml      --build-dir .aws-sam/csv-parser
           sam build --template lambdas/rollcall-lambda/template.yaml  --build-dir .aws-sam/rollcall-lambda
