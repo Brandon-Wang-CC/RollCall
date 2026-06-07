@@ -193,35 +193,28 @@ def publish_to_sns(ret_addr: str, orig_message_id: str = "", orig_subject: str =
     logger.info("Published SNS message: %s", response["MessageId"])
 
 
-def _send_failure_email(to_email, subject_ref=""):
+def _send_failure_email(to_email, subject_ref="", error_msg=""):
     if not to_email or not SENDER_EMAIL:
         logger.warning("Cannot send failure notification — sender or recipient email not configured")
         return
     try:
-        subject_line = f'Pipeline Error — Unable to Process Submission'
-        body_lines = [
-            "Hello,",
-            "",
-            "We were unable to process your most recent submission.",
-        ]
-        if subject_ref:
-            body_lines.append(f'  Original email:  {subject_ref}')
-        body_lines += [
-            "",
-            "An error occurred while extracting the attached files. No output "
-            "report was generated.",
-            "",
-            "Please check that all required attachments were included and try "
-            "again. If the problem persists, contact your administrator.",
-            "",
-            "— RollCall",
-        ]
+        ref = f' "{subject_ref}"' if subject_ref else ""
+        body = (
+            f"Your submission{ref} could not be processed. An error occurred while "
+            "reading the attached files and no output report was generated.\n\n"
+        )
+        if error_msg:
+            body += f"Error: {error_msg}\n\n"
+        body += (
+            "Please check that all required report files are attached and resubmit. "
+            "If the problem continues, contact your administrator."
+        )
         ses_client.send_email(
             Source=SENDER_EMAIL,
             Destination={"ToAddresses": [to_email]},
             Message={
-                "Subject": {"Data": subject_line},
-                "Body":    {"Text": {"Data": "\n".join(body_lines)}},
+                "Subject": {"Data": "Pipeline Error — Unable to Process Submission"},
+                "Body":    {"Text": {"Data": body}},
             },
         )
         logger.info("Failure notification sent to %s", to_email)
@@ -338,5 +331,5 @@ def lambda_handler(event, context):
 
     except Exception as e:
         logger.error("Unhandled exception: %s", e, exc_info=True)
-        _send_failure_email(sender_email, orig_subject)
+        _send_failure_email(sender_email, orig_subject, error_msg=str(e))
         raise

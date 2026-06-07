@@ -789,32 +789,27 @@ def write_output_workbook(crew_unfilled, crew_filled, contractor_unfilled, contr
 
     return output_path
 
-def _send_failure_email(to_email, subject_ref=""):
+def _send_failure_email(to_email, subject_ref="", error_msg=""):
     if not to_email or not SENDER_EMAIL:
         logger.warning("Cannot send failure notification — sender or recipient email not configured")
         return
     try:
-        body_lines = [
-            "Hello,",
-            "",
-            "Your files were received, but an error occurred while generating "
-            "the reconciliation report.",
-        ]
-        if subject_ref:
-            body_lines.append(f"  Original email:  {subject_ref}")
-        body_lines += [
-            "",
-            "No output report was delivered. Please try resubmitting your "
-            "files. If the problem persists, contact your administrator.",
-            "",
-            "— RollCall",
-        ]
+        ref = f' "{subject_ref}"' if subject_ref else ""
+        body = (
+            f"Your files{ref} were received, but an error occurred while generating "
+            "the reconciliation report. No output workbook was delivered.\n\n"
+        )
+        if error_msg:
+            body += f"Error: {error_msg}\n\n"
+        body += (
+            "Please resubmit your files. If the problem continues, contact your administrator."
+        )
         ses.send_email(
             Source=SENDER_EMAIL,
             Destination={"ToAddresses": [to_email]},
             Message={
                 "Subject": {"Data": "Pipeline Error — Report Generation Failed"},
-                "Body":    {"Text": {"Data": "\n".join(body_lines)}},
+                "Body":    {"Text": {"Data": body}},
             },
         )
         logger.info("Failure notification sent to %s", to_email)
@@ -870,5 +865,5 @@ def lambda_handler(event, context):
 
     except Exception as e:
         logger.error("Unhandled exception: %s", e, exc_info=True)
-        _send_failure_email(ret_addr, orig_subject)
+        _send_failure_email(ret_addr, orig_subject, error_msg=str(e))
         raise
