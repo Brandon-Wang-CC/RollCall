@@ -1,5 +1,7 @@
 name: Deploy
 
+run-name: Deploy → ${{ inputs.env || 'eng' }}
+
 on:
   workflow_dispatch:
     inputs:
