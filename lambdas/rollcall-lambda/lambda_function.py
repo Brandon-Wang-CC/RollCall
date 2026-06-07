@@ -421,12 +421,6 @@ def build_contractor_unfilled(filtered, ref):
     # ESF Reqs lookup as strings (contractor req numbers may be non-numeric)
     esf_reqs["Req #"] = esf_reqs["Req #"].astype(str).str.strip()
     req_exists_set = set(esf_reqs["Req #"].dropna())
-    req_to_hire = (
-        esf_reqs.dropna(subset=["Req #"])
-        .set_index("Req #")["Hire Name"]
-        .to_dict()
-        if "Hire Name" in esf_reqs.columns else {}
-    )
 
     rows = []
     for idx, row in df.iterrows():
@@ -468,8 +462,7 @@ def build_contractor_unfilled(filtered, ref):
             if req_num_str not in req_exists_set and req_num_str not in prev_req_nums:
                 existing_v_new = "NEW"
             else:
-                esf_hire = req_to_hire.get(req_num_str, "")
-                existing_v_new = "Open" if (pd.isna(esf_hire) or esf_hire == "") else "Filled"
+                existing_v_new = "Existing"
 
             loc = str(row.get("LOC", "")).strip()
             state = {"PA": "Pennsylvania", "TX": "Texas"}.get(loc, loc)
