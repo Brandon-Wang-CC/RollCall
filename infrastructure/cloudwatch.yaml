@@ -27,6 +27,7 @@ Resources:
       EvaluationPeriods: 1
       Threshold: 0
       ComparisonOperator: GreaterThanThreshold
+      TreatMissingData: notBreaching
 
   # Fires when rollcall-lambda has any errors in a 5-minute window
   RollCallLambdaErrorAlarm:
@@ -46,3 +47,4 @@ Resources:
       EvaluationPeriods: 1
       Threshold: 0
       ComparisonOperator: GreaterThanThreshold
+      TreatMissingData: notBreaching

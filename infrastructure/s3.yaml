@@ -60,6 +60,14 @@ Resources:
     Type: AWS::S3::Bucket
     Properties:
       BucketName: !Ref DeptsBucket
+      VersioningConfiguration:
+        Status: Enabled
+      LifecycleConfiguration:
+        Rules:
+          - Id: expire-noncurrent-versions-30-days
+            Status: Enabled
+            NoncurrentVersionExpiration:
+              NoncurrentDays: 30
       BucketEncryption:
         ServerSideEncryptionConfiguration:
           - ServerSideEncryptionByDefault:
@@ -93,6 +101,11 @@ Resources:
     Type: AWS::S3::Bucket
     Properties:
       BucketName: !Ref SesBucket
+      LifecycleConfiguration:
+        Rules:
+          - Id: expire-raw-emails-30-days
+            Status: Enabled
+            ExpirationInDays: 30
       BucketEncryption:
         ServerSideEncryptionConfiguration:
           - ServerSideEncryptionByDefault:
