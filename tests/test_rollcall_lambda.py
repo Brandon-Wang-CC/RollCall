@@ -339,17 +339,19 @@ def test_lambda_handler_extracts_ret_addr():
         raise RuntimeError("stop here")
 
     event = make_rollcall_event(ret_addr="user@example.com")
+    ctx = MagicMock(function_name="rollcall-lambda")
     with patch.object(rollcall, "discover_files", side_effect=fake_discover), \
          patch.object(rollcall, "s3", MagicMock()):
         with pytest.raises(RuntimeError):
-            rollcall.lambda_handler(event, {})
+            rollcall.lambda_handler(event, ctx)
 
     assert captured["called"]
 
 
 def test_lambda_handler_reraises_on_error():
     event = make_rollcall_event()
+    ctx = MagicMock(function_name="rollcall-lambda")
     with patch.object(rollcall, "discover_files", side_effect=FileNotFoundError("missing")), \
          patch.object(rollcall, "s3", MagicMock()):
         with pytest.raises(FileNotFoundError):
-            rollcall.lambda_handler(event, {})
+            rollcall.lambda_handler(event, ctx)

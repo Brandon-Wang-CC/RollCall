@@ -9,7 +9,16 @@ Parameters:
 
 Resources:
 
-  # Dead-letter queue for rollcall-sqs — audit trail for failed runs
+  # Dead-letter queue for CSV-Parser-queue — audit trail for failed runs (no retry)
+  CSVParserDLQ:
+    Type: AWS::SQS::Queue
+    Properties:
+      QueueName: !Sub "csv-parser-dlq${Env}"
+      VisibilityTimeout: 360
+      MessageRetentionPeriod: 1209600
+      SqsManagedSseEnabled: true
+
+  # Dead-letter queue for rollcall-sqs — audit trail for failed runs (no retry)
   RollCallDLQ:
     Type: AWS::SQS::Queue
     Properties:
@@ -28,7 +37,7 @@ Resources:
       ReceiveMessageWaitTimeSeconds: 20
       RedrivePolicy:
         deadLetterTargetArn: !GetAtt RollCallDLQ.Arn
-        maxReceiveCount: 5
+        maxReceiveCount: 1
       SqsManagedSseEnabled: true
 
   RollCallQueuePolicy:
@@ -56,6 +65,9 @@ Resources:
       QueueName: !Sub "CSV-Parser-queue${Env}"
       VisibilityTimeout: 360
       MessageRetentionPeriod: 345600
+      RedrivePolicy:
+        deadLetterTargetArn: !GetAtt CSVParserDLQ.Arn
+        maxReceiveCount: 1
       SqsManagedSseEnabled: true
 
   CSVParserQueuePolicy:
@@ -97,3 +109,8 @@ Outputs:
     Value: !GetAtt CSVParserQueue.Arn
     Export:
       Name: !Sub "csv-parser-queue-arn${Env}"
+
+  CSVParserDLQArn:
+    Value: !GetAtt CSVParserDLQ.Arn
+    Export:
+      Name: !Sub "csv-parser-dlq-arn${Env}"

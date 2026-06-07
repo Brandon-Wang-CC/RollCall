@@ -9,11 +9,14 @@ Parameters:
 
 Resources:
 
-  # Fires when csvParser has any errors in a 5-minute window
+  # Fires when csvParser accumulates >= 3 errors in a 24-hour window
   CSVParserErrorAlarm:
     Type: AWS::CloudWatch::Alarm
     Properties:
       AlarmName: !Sub "Lambda1_Errors${Env}"
+      AlarmDescription: !Sub >-
+        csvParser${Env} has logged 3 or more errors in the past 24 hours.
+        Failed messages are held in the SQS dead-letter queue: csv-parser-dlq${Env}.
       ActionsEnabled: true
       AlarmActions:
         - !Sub arn:aws:sns:${AWS::Region}:${AWS::AccountId}:Lambda1_Error_Notif${Env}
@@ -23,17 +26,20 @@ Resources:
       Dimensions:
         - Name: FunctionName
           Value: !Sub "csvParser${Env}"
-      Period: 300
+      Period: 86400
       EvaluationPeriods: 1
-      Threshold: 0
-      ComparisonOperator: GreaterThanThreshold
+      Threshold: 3
+      ComparisonOperator: GreaterThanOrEqualToThreshold
       TreatMissingData: notBreaching
 
-  # Fires when rollcall-lambda has any errors in a 5-minute window
+  # Fires when rollcall-lambda accumulates >= 3 errors in a 24-hour window
   RollCallLambdaErrorAlarm:
     Type: AWS::CloudWatch::Alarm
     Properties:
       AlarmName: !Sub "Lambda2_Errors${Env}"
+      AlarmDescription: !Sub >-
+        rollcall-lambda${Env} has logged 3 or more errors in the past 24 hours.
+        Failed messages are held in the SQS dead-letter queue: rollcall-dlq-sqs${Env}.
       ActionsEnabled: true
       AlarmActions:
         - !Sub arn:aws:sns:${AWS::Region}:${AWS::AccountId}:Lambda2_Error_Notif${Env}
@@ -43,8 +49,8 @@ Resources:
       Dimensions:
         - Name: FunctionName
           Value: !Sub "rollcall-lambda${Env}"
-      Period: 300
+      Period: 86400
       EvaluationPeriods: 1
-      Threshold: 0
-      ComparisonOperator: GreaterThanThreshold
+      Threshold: 3
+      ComparisonOperator: GreaterThanOrEqualToThreshold
       TreatMissingData: notBreaching

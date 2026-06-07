@@ -1,6 +1,6 @@
 name: Deploy
 
-run-name: Deploy → ${{ inputs.env || 'test' }}
+run-name: Deploy → ${{ inputs.env || 'test' }} (${{ github.ref_name }})
 
 on:
   workflow_dispatch:
@@ -90,9 +90,9 @@ jobs:
             'stack-csv-parser':  config['stacks']['csvParser'],
             'stack-rollcall':    config['stacks']['rollcallLambda'],
             'stack-ses-emailer': config['stacks']['sesEmailer'],
-            'csv-bucket':        settings['CsvBucket'],
-            'depts-bucket':      settings['DeptsBucket'],
-            'ses-bucket':        settings['SesBucket'],
+            'csv-bucket':        config['buckets']['csv'],
+            'depts-bucket':      config['buckets']['depts'],
+            'ses-bucket':        config['buckets']['ses'],
             'sender-domain':              settings['SenderDomain'],
             'sender-email':               settings['SenderEmail'],
             'file-prefix-unfilled':       settings['FilePrefixUnfilled'],
@@ -292,7 +292,7 @@ jobs:
             --region $AWS_REGION \
             --resolve-s3 \
             --capabilities CAPABILITY_NAMED_IAM \
-            --parameter-overrides CsvBucket=$CSV_BUCKET Env="$ENV_SUFFIX" FilePrefixUnfilled=$FILE_PREFIX_UNFILLED FilePrefixContractorOpen=$FILE_PREFIX_CONTRACTOR_OPEN FilePrefixCandidates=$FILE_PREFIX_CANDIDATES \
+            --parameter-overrides CsvBucket=$CSV_BUCKET SenderEmail=$SENDER_EMAIL Env="$ENV_SUFFIX" FilePrefixUnfilled=$FILE_PREFIX_UNFILLED FilePrefixContractorOpen=$FILE_PREFIX_CONTRACTOR_OPEN FilePrefixCandidates=$FILE_PREFIX_CANDIDATES \
             --no-confirm-changeset \
             --no-fail-on-empty-changeset
 
@@ -317,6 +317,7 @@ jobs:
               f'FilePrefixContractorClosed={enc(settings["FilePrefixContractorClosed"])}',
               f'FilePrefixCandidates={enc(settings["FilePrefixCandidates"])}',
               f'MD1Name={enc(settings["MD1Name"])}',
+              f'SenderEmail={os.environ["SENDER_EMAIL"]}',
               f'Env={os.environ["ENV_SUFFIX"]}',
             '--no-confirm-changeset',
             '--no-fail-on-empty-changeset',

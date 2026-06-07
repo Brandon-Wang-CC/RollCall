@@ -3,6 +3,7 @@ import io
 import logging
 import json
 import email
+import email.mime.text
 import os
 import zipfile
 import xml.etree.ElementTree as ET
@@ -15,11 +16,13 @@ from datetime import datetime
 
 s3 = boto3.client("s3")
 sns_client = boto3.client("sns")
+ses_client = boto3.client("ses")
 
 logger = logging.getLogger()
 logger.setLevel(logging.INFO)
 
-CSV_BUCKET = os.environ.get("CSV_BUCKET")
+CSV_BUCKET   = os.environ.get("CSV_BUCKET")
+SENDER_EMAIL = os.environ.get("SENDER_EMAIL")
 NS = {"main": "http://schemas.openxmlformats.org/spreadsheetml/2006/main"}
 
 
@@ -174,28 +177,64 @@ def parse_csv_to_rows(csv_bytes):
 
 
 
-def publish_to_sns(object_key: str, orig_message_id: str = "", orig_subject: str = ""):
+def publish_to_sns(ret_addr: str, orig_message_id: str = "", orig_subject: str = ""):
     topic_arn = os.environ.get("SNS_TOPIC_ARN")
-
     message = {
         "status": "processed",
         "bucket": CSV_BUCKET,
-        "retAddr": object_key,
+        "retAddr": ret_addr,
         "origMessageId": orig_message_id,
         "origSubject": orig_subject,
     }
+    response = sns_client.publish(
+        TopicArn=topic_arn,
+        Message=json.dumps(message),
+        Subject="New XLSX File Processed"
+    )
+    logger.info("Published SNS message: %s", response["MessageId"])
 
+
+def _send_failure_email(to_email, subject_ref="", error_msg="", orig_message_id="", source=""):
+    if not to_email or not SENDER_EMAIL:
+        logger.warning("Cannot send failure notification — sender or recipient email not configured")
+        return
     try:
-        response = sns_client.publish(
-            TopicArn=topic_arn,
-            Message=json.dumps(message),
-            Subject="New XLSX File Processed"
+        if subject_ref:
+            prefix = "" if subject_ref.upper().startswith("RE:") else "RE: "
+            subject = f"{prefix}{subject_ref}"
+        else:
+            subject = "Pipeline Error — Unable to Process Submission"
+
+        ref = f' "{subject_ref}"' if subject_ref else ""
+        body = (
+            f"Your submission{ref} could not be processed. An error occurred while "
+            "reading the attached files and no output report was generated.\n\n"
         )
-        logger.info("Published SNS message: %s", response["MessageId"])
+        if error_msg:
+            body += f"Error: {error_msg}\n\n"
+        body += (
+            "Please check that all required report files are attached and resubmit. "
+            "If the problem continues, contact your administrator."
+        )
+        if source:
+            body += f"\n\nFailed in: {source}"
 
+        msg = email.mime.text.MIMEText(body, "plain")
+        msg["Subject"] = subject
+        msg["From"]    = SENDER_EMAIL
+        msg["To"]      = to_email
+        if orig_message_id:
+            msg["In-Reply-To"] = orig_message_id
+            msg["References"]  = orig_message_id
+
+        ses_client.send_raw_email(
+            Source=SENDER_EMAIL,
+            Destinations=[to_email],
+            RawMessage={"Data": msg.as_string()},
+        )
+        logger.info("Failure notification sent to %s", to_email)
     except Exception as e:
-        logger.error("Error publishing to SNS: %s", e)
-
+        logger.error("Could not send failure notification to %s: %s", to_email, e)
 
 
 def _get_object_with_retry(bucket, key, max_retries=3):
@@ -226,77 +265,86 @@ def lambda_handler(event, context):
     start = time.time()
     logger.info(f"Event received: {json.dumps(event, indent=2)}")
 
-    wipe_buckets()
+    sender_email    = None
+    orig_message_id = ""
+    orig_subject    = ""
+    try:
+        wipe_buckets()
 
-    first_msg = json.loads(json.loads(event["Records"][0]["body"])["Message"])
-    sender_email = first_msg["mail"]["source"]
-    common_headers = first_msg.get("mail", {}).get("commonHeaders", {})
-    orig_message_id = common_headers.get("messageId", "")
-    orig_subject    = common_headers.get("subject", "")
-    logger.info("Email source: %s | orig messageId: %s | subject: %s", sender_email, orig_message_id, orig_subject)
+        first_msg       = json.loads(json.loads(event["Records"][0]["body"])["Message"])
+        sender_email    = first_msg["mail"]["source"]
+        common_headers  = first_msg.get("mail", {}).get("commonHeaders", {})
+        orig_message_id = common_headers.get("messageId", "")
+        orig_subject    = common_headers.get("subject", "")
+        logger.info("Email source: %s | orig messageId: %s | subject: %s", sender_email, orig_message_id, orig_subject)
 
-    BLOCKED_SENDERS = {"no-reply-aws@amazon.com"}
-    if sender_email in BLOCKED_SENDERS:
-        logger.info(f"Ignoring email from blocked sender: {sender_email}")
-        return {"status": "ignored", "reason": "blocked sender"}
+        BLOCKED_SENDERS = {"no-reply-aws@amazon.com"}
+        if sender_email in BLOCKED_SENDERS:
+            logger.info(f"Ignoring email from blocked sender: {sender_email}")
+            return {"status": "ignored", "reason": "blocked sender"}
 
-    total_files = 0
-    processed_files = []
-    seen_filenames = []
+        total_files = 0
+        processed_files = []
+        seen_filenames = []
 
-    for record in event.get("Records", []):
-        sns_message = record["body"]
-        message = json.loads(sns_message)["Message"]
-        mail_obj = json.loads(message)
+        for record in event.get("Records", []):
+            sns_message = record["body"]
+            message = json.loads(sns_message)["Message"]
+            mail_obj = json.loads(message)
 
-        s3_info = mail_obj["receipt"]["action"]
-        bucket_name = s3_info["bucketName"]
-        object_key = s3_info["objectKey"]
+            s3_info = mail_obj["receipt"]["action"]
+            bucket_name = s3_info["bucketName"]
+            object_key = s3_info["objectKey"]
 
-        logger.info("Processing email: %s/%s", bucket_name, object_key)
+            logger.info("Processing email: %s/%s", bucket_name, object_key)
 
-        email_obj = _get_object_with_retry(bucket_name, object_key)
-        msg = email.message_from_binary_file(email_obj["Body"])
+            email_obj = _get_object_with_retry(bucket_name, object_key)
+            msg = email.message_from_binary_file(email_obj["Body"])
 
-        for part in msg.walk():
-            if "attachment" not in part.get("Content-Disposition", ""):
-                continue
-            if part.get_content_maintype() == "multipart":
-                continue
+            for part in msg.walk():
+                if "attachment" not in part.get("Content-Disposition", ""):
+                    continue
+                if part.get_content_maintype() == "multipart":
+                    continue
 
-            filename = part.get_filename()
-            if not filename:
-                logger.info("Skipping attachment part with no filename (Content-Type: %s)", part.get_content_type())
-                continue
+                filename = part.get_filename()
+                if not filename:
+                    logger.info("Skipping attachment part with no filename (Content-Type: %s)", part.get_content_type())
+                    continue
 
-            file_content = part.get_payload(decode=True)
-            total_files += 1
+                file_content = part.get_payload(decode=True)
+                total_files += 1
 
-            results = process_file(filename, file_content)
-            if results:
-                seen_filenames.append(filename)
-            processed_files.extend(results)
+                results = process_file(filename, file_content)
+                if results:
+                    seen_filenames.append(filename)
+                processed_files.extend(results)
 
-            del file_content
+                del file_content
 
-    logger.info("Processed %d attachment(s) → %d output file(s): %s", total_files, len(processed_files), processed_files)
+        logger.info("Processed %d attachment(s) → %d output file(s): %s", total_files, len(processed_files), processed_files)
 
-    missing = []
-    if not any(f.startswith(FILE_PREFIX_UNFILLED) for f in seen_filenames):
-        missing.append(f"unfilled report (expected prefix: '{FILE_PREFIX_UNFILLED}')")
-    if not any(f.startswith(FILE_PREFIX_CONTRACTOR_BASE) for f in seen_filenames):
-        missing.append(f"contractor report (expected prefix: '{FILE_PREFIX_CONTRACTOR_BASE}')")
-    if not any(f.startswith(FILE_PREFIX_CANDIDATES) for f in seen_filenames):
-        missing.append(f"candidates report (expected prefix: '{FILE_PREFIX_CANDIDATES}')")
-    if missing:
-        raise ValueError(f"Email is missing required attachments: {'; '.join(missing)}")
+        missing = []
+        if not any(f.startswith(FILE_PREFIX_UNFILLED) for f in seen_filenames):
+            missing.append(f"unfilled report (expected prefix: '{FILE_PREFIX_UNFILLED}')")
+        if not any(f.startswith(FILE_PREFIX_CONTRACTOR_BASE) for f in seen_filenames):
+            missing.append(f"contractor report (expected prefix: '{FILE_PREFIX_CONTRACTOR_BASE}')")
+        if not any(f.startswith(FILE_PREFIX_CANDIDATES) for f in seen_filenames):
+            missing.append(f"candidates report (expected prefix: '{FILE_PREFIX_CANDIDATES}')")
+        if missing:
+            raise ValueError(f"Email is missing required attachments: {'; '.join(missing)}")
 
-    publish_to_sns(sender_email, orig_message_id, orig_subject)
+        publish_to_sns(sender_email, orig_message_id, orig_subject)
 
-    elapsed = time.time() - start
-    logger.info("Handler complete in %.2fs", elapsed)
-    return {
-        "status": "success",
-        "processed_files": processed_files,
-        "total_files": total_files
-    }
+        elapsed = time.time() - start
+        logger.info("Handler complete in %.2fs", elapsed)
+        return {
+            "status": "success",
+            "processed_files": processed_files,
+            "total_files": total_files
+        }
+
+    except Exception as e:
+        logger.error("Unhandled exception: %s", e, exc_info=True)
+        _send_failure_email(sender_email, orig_subject, error_msg=str(e), orig_message_id=orig_message_id, source=context.function_name)
+        raise

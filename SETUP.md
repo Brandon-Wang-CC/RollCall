@@ -32,15 +32,10 @@ Three files need to be filled in before deploying.
 
 | Setting | What to put here |
 |---------|-----------------|
-| `CsvBucket` | A globally unique S3 bucket name for parsed email attachments (e.g. `yourorg-rollcall-csv`) |
-| `DeptsBucket` | A globally unique S3 bucket name for reference files and output workbooks (e.g. `yourorg-rollcall-data`) |
-| `SesBucket` | A globally unique S3 bucket name for raw inbound emails (e.g. `yourorg-rollcall-ses`) |
 | `SenderDomain` | A **subdomain** your organization controls — see note below |
 | `SenderEmail` | The full send/receive address for the pipeline (e.g. `rollcall@pipeline.yourdomain.com`) |
 
 > **Why a subdomain is required:** AWS SES email receiving works by pointing an MX record at AWS. Using your root domain (e.g. `yourdomain.com`) would redirect all employee email to AWS. Use a dedicated subdomain (e.g. `pipeline.yourdomain.com`) so only mail sent to that address is handled by the pipeline. Your DNS team will need to create this subdomain — see Step 4.
-
-S3 bucket names must be unique across all AWS accounts globally. If a name is taken, the deploy will fail with `BucketAlreadyExists` — choose names specific to your organization.
 
 ### `.github/deploy-config.yaml`
 
@@ -48,12 +43,17 @@ S3 bucket names must be unique across all AWS accounts globally. If a name is ta
 |---------|-----------------|
 | `aws.region` | AWS region to deploy into (e.g. `us-east-1`) — **must be one of `us-east-1`, `us-west-2`, or `eu-west-1`**; SES email receiving is only supported in those three regions |
 | `aws.oidcRoleArn` | ARN of the IAM role GitHub Actions will use — your AWS team will provide this (Step 2) |
+| `buckets.csv` | Globally unique S3 bucket name for parsed email attachments (e.g. `yourorg-rollcall-csv`) |
+| `buckets.depts` | Globally unique S3 bucket name for reference files and output workbooks (e.g. `yourorg-rollcall-data`) |
+| `buckets.ses` | Globally unique S3 bucket name for raw inbound emails (e.g. `yourorg-rollcall-ses`) |
+
+S3 bucket names must be unique across all AWS accounts globally. If a name is taken, the deploy will fail with `BucketAlreadyExists` — choose names specific to your organization.
 
 Stack names under `stacks` can be left as-is unless they conflict with existing CloudFormation stacks in your account.
 
 ### `.github/CODEOWNERS`
 
-Replace the placeholder email with the address that should receive CloudWatch alarm notifications if a Lambda error occurs during a pipeline run. This is typically an operations or on-call contact. The same address is also set as the GitHub code owner for the repository, so it will receive pull request review requests.
+Replace the placeholder email with the address (or email group) that should receive CloudWatch alarm notifications when the pipeline error threshold is met. The alarm fires when **3 or more Lambda failures occur within a single calendar day** — at that point, AWS SNS sends a notification email to this address. This is typically an operations or on-call distribution list. The same address is also set as the GitHub code owner for the repository, so it will receive pull request review requests.
 
 ### `reference-data/` — Seed the output workbook
 
@@ -199,7 +199,7 @@ Once DNS records have propagated (allow up to 24–48 hours after your DNS team 
 The GitHub Actions role lacks sufficient permissions. Ask your AWS team to verify it has `AdministratorAccess` or equivalent permissions covering CloudFormation, Lambda, IAM, SES, SQS, SNS, and S3.
 
 **Deploy fails with `BucketAlreadyExists`**
-The bucket name in `user-settings.yaml` is taken by another AWS account. Choose a more unique name and redeploy.
+A bucket name in `.github/deploy-config.yaml` is taken by another AWS account. Choose a more unique name and redeploy.
 
 **Emails arrive at the SES bucket but csvParser doesn't trigger**
 Check that the SNS and SQS stacks deployed successfully and that the SES receipt rule set is active. In the SES console, go to **Email receiving → Rule sets** and confirm `DeliverToS3` is listed as active.
