@@ -1,10 +1,12 @@
-name: Teardown
+name: Delete
+
+run-name: Delete → ${{ inputs.env }}
 
 on:
   workflow_dispatch:
     inputs:
       env:
-        description: 'Target environment to tear down'
+        description: 'Target environment to delete'
         required: true
         type: choice
         options:
@@ -70,26 +72,27 @@ jobs:
           EOF
 
   # ── Delete all stacks in reverse dependency order ─────────────────────────────
-  teardown:
+  delete:
     needs: load-config
     runs-on: ubuntu-latest
     environment: production
 
     env:
-      AWS_REGION:       ${{ needs.load-config.outputs.aws-region }}
-      ENV_SUFFIX:       -${{ inputs.env }}
-      CSV_BUCKET:       ${{ needs.load-config.outputs.csv-bucket }}-${{ inputs.env }}
-      DEPTS_BUCKET:     ${{ needs.load-config.outputs.depts-bucket }}-${{ inputs.env }}
-      SES_BUCKET:       ${{ needs.load-config.outputs.ses-bucket }}-${{ inputs.env }}
-      STACK_IAM:        ${{ needs.load-config.outputs.stack-iam }}
-      STACK_S3:         ${{ needs.load-config.outputs.stack-s3 }}
-      STACK_SNS:        ${{ needs.load-config.outputs.stack-sns }}
-      STACK_SQS:        ${{ needs.load-config.outputs.stack-sqs }}
-      STACK_SES:        ${{ needs.load-config.outputs.stack-ses }}
-      STACK_CLOUDWATCH: ${{ needs.load-config.outputs.stack-cloudwatch }}
-      STACK_CSV_PARSER: ${{ needs.load-config.outputs.stack-csv-parser }}
-      STACK_ROLLCALL:   ${{ needs.load-config.outputs.stack-rollcall }}
-      STACK_SES_EMAILER: ${{ needs.load-config.outputs.stack-ses-emailer }}
+      AWS_REGION:        ${{ needs.load-config.outputs.aws-region }}
+      # Mirrors deploy: prod gets no suffix, all other envs get -<env>
+      ENV_SUFFIX:        ${{ inputs.env != 'prod' && format('-{0}', inputs.env) || '' }}
+      CSV_BUCKET:        ${{ needs.load-config.outputs.csv-bucket }}${{ inputs.env != 'prod' && format('-{0}', inputs.env) || '' }}
+      DEPTS_BUCKET:      ${{ needs.load-config.outputs.depts-bucket }}${{ inputs.env != 'prod' && format('-{0}', inputs.env) || '' }}
+      SES_BUCKET:        ${{ needs.load-config.outputs.ses-bucket }}${{ inputs.env != 'prod' && format('-{0}', inputs.env) || '' }}
+      STACK_IAM:         ${{ needs.load-config.outputs.stack-iam }}${{ inputs.env != 'prod' && format('-{0}', inputs.env) || '' }}
+      STACK_S3:          ${{ needs.load-config.outputs.stack-s3 }}${{ inputs.env != 'prod' && format('-{0}', inputs.env) || '' }}
+      STACK_SNS:         ${{ needs.load-config.outputs.stack-sns }}${{ inputs.env != 'prod' && format('-{0}', inputs.env) || '' }}
+      STACK_SQS:         ${{ needs.load-config.outputs.stack-sqs }}${{ inputs.env != 'prod' && format('-{0}', inputs.env) || '' }}
+      STACK_SES:         ${{ needs.load-config.outputs.stack-ses }}${{ inputs.env != 'prod' && format('-{0}', inputs.env) || '' }}
+      STACK_CLOUDWATCH:  ${{ needs.load-config.outputs.stack-cloudwatch }}${{ inputs.env != 'prod' && format('-{0}', inputs.env) || '' }}
+      STACK_CSV_PARSER:  ${{ needs.load-config.outputs.stack-csv-parser }}${{ inputs.env != 'prod' && format('-{0}', inputs.env) || '' }}
+      STACK_ROLLCALL:    ${{ needs.load-config.outputs.stack-rollcall }}${{ inputs.env != 'prod' && format('-{0}', inputs.env) || '' }}
+      STACK_SES_EMAILER: ${{ needs.load-config.outputs.stack-ses-emailer }}${{ inputs.env != 'prod' && format('-{0}', inputs.env) || '' }}
 
     steps:
       - uses: actions/checkout@v4
@@ -150,10 +153,19 @@ jobs:
           aws cloudformation delete-stack --stack-name $STACK_CSV_PARSER --region $AWS_REGION
           aws cloudformation wait stack-delete-complete --stack-name $STACK_CSV_PARSER --region $AWS_REGION
 
+      # Runs unconditionally — a non-prod rule set may have been manually activated
+      # for testing (deploy intentionally skips activating non-prod rule sets).
+      # Deactivates only if this env's rule set is currently active; leaves others alone.
       - name: Deactivate SES receipt rule set
-        if: inputs.env == 'prod'
         run: |
-          aws ses set-active-receipt-rule-set --region $AWS_REGION || true
+          active=$(aws ses describe-active-receipt-rule-set --region $AWS_REGION \
+            --query "Metadata.Name" --output text 2>/dev/null || echo "")
+          if [ "$active" = "DeliverToS3${ENV_SUFFIX}" ]; then
+            echo "Deactivating $active..."
+            aws ses set-active-receipt-rule-set --region $AWS_REGION
+          else
+            echo "Rule set DeliverToS3${ENV_SUFFIX} is not active (active: ${active:-none}), skipping."
+          fi
 
       - name: Delete SES rules
         run: |
