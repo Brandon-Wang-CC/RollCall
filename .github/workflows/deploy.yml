@@ -155,6 +155,7 @@ jobs:
 
       # ── Pre-flight: resolve stacks in undeployable states ────────────────────
       # ROLLBACK_COMPLETE: changeset creation fails — delete so next step recreates.
+      # REVIEW_IN_PROGRESS: new stack with unexecuted changeset — delete and recreate.
       # UPDATE_COMPLETE_CLEANUP_IN_PROGRESS: transient post-update cleanup — wait it out.
 
       - name: Resolve stacks in undeployable states
@@ -162,8 +163,8 @@ jobs:
           for stack in $STACK_IAM $STACK_S3 $STACK_SNS $STACK_SQS $STACK_SES $STACK_CLOUDWATCH $STACK_CSV_PARSER $STACK_ROLLCALL $STACK_SES_EMAILER; do
             status=$(aws cloudformation describe-stacks --stack-name "$stack" --region $AWS_REGION \
               --query "Stacks[0].StackStatus" --output text 2>/dev/null || echo "DOES_NOT_EXIST")
-            if [ "$status" = "ROLLBACK_COMPLETE" ]; then
-              echo "Deleting $stack (ROLLBACK_COMPLETE)..."
+            if [ "$status" = "ROLLBACK_COMPLETE" ] || [ "$status" = "REVIEW_IN_PROGRESS" ]; then
+              echo "Deleting $stack ($status)..."
               aws cloudformation delete-stack --stack-name "$stack" --region $AWS_REGION
               aws cloudformation wait stack-delete-complete --stack-name "$stack" --region $AWS_REGION
             elif [ "$status" = "UPDATE_COMPLETE_CLEANUP_IN_PROGRESS" ]; then
