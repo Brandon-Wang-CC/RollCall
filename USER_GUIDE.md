@@ -32,8 +32,8 @@
 RollCall is an automated headcount reconciliation pipeline. Each week, you email a set of XLSX report exports to a pipeline address. Within minutes, the pipeline emails back a single combined output workbook that:
 
 - Merges Crew (unfilled and filled) and Contractor (unfilled and filled) data into one sheet
-- Annotates each requisition as **NEW**, **Open**, **Filled**, or **Carried Forward**
-- Retains requisitions from the previous run that are no longer in the current reports, labeled "Carried Forward," so nothing falls through the cracks between reporting cycles
+- Annotates each requisition as **NEW**, **Open**, **Filled**, or **Removed**
+- Requisitions that disappear from the current reports are labeled "Removed" in the next output, then automatically dropped from future runs
 
 No manual data wrangling. The same address receives the trigger email and sends the output back to you.
 
@@ -234,17 +234,7 @@ The subject line and email body do not matter. The output workbook is returned t
 
 ### Reading the Output Workbook
 
-The output workbook contains a single **Output** sheet with all requisitions from the current run plus any carried forward from the previous run. Key columns:
-
-| Column | What it means |
-|--------|--------------|
-| `Existing v New` | See table below |
-| `Worker Type` | `Regular` for crew rows; `Contractor` for contractor rows |
-| `Status` | Short status code derived from the full candidate/contractor status in the source report. For contractor filled rows this column instead shows `Newly Filled`, `Filled`, `Validate if started`, or `NEW` (the fill-state classification). |
-| `Req #` | Requisition number — the key used to match rows across runs |
-| `MD-1` / `MD-2` | Management hierarchy populated from reference data |
-| `Hire Name` | Candidate or hire name when present |
-| `Contractor Req Status` | Raw status string from the contractor report (contractor rows only) |
+The output workbook contains a single **Output** sheet with all requisitions from the current run plus any carried forward from the previous run. 
 
 **`Existing v New` values:**
 
@@ -256,7 +246,7 @@ The output workbook contains a single **Output** sheet with all requisitions fro
 | `Update Date` | Crew Filled | Start date changed since the last ESF WF reference snapshot |
 | `Open` | Contractor Unfilled | Req is in the ESF WF reference but no hire name recorded yet |
 | `Filled` | Contractor Unfilled, Contractor Filled | Req is in the ESF WF reference and a hire name is present; all contractor closed/filled rows |
-| `Carried Forward` | All row types | Req was in the previous run's output but absent from this run's reports — retained so it does not silently disappear |
+| `Removed` | All row types | Req was in the previous run's output but absent from this run's reports — surfaced once so it is not silently lost, then excluded from all future runs |
 
 ---
 
@@ -277,7 +267,7 @@ If a failure email arrives, correct the issue and resubmit the same three report
 
 ## Carry-Forward Tracking
 
-Each pipeline run reads the previous run's output from `DeptsBucket`. Any requisition that was in the previous output but is absent from the current reports is carried into the new output labeled `Existing v New = "Carried Forward"`. This prevents requisitions from disappearing silently between reporting cycles.
+Each pipeline run reads the previous run's output from `DeptsBucket`. Any requisition that was in the previous output but is absent from the current reports is included in the new output labeled `Existing v New = "Removed"`, then permanently dropped from the carry-forward seed. This means a removed requisition surfaces exactly once — visible in the output for the run where it disappeared — and does not appear again in subsequent runs.
 
 **Fresh deploy:** If no previous output exists yet (first run after deploy), the pipeline bootstraps carry-forward state from the `Reqs` sheet of `reference-data/ESF WF data file ref.xlsx`. See the "Seed the reference workbook" section under Step 1.
 
@@ -330,8 +320,8 @@ Work through the pipeline stages:
 3. **CloudWatch → `/aws/lambda/rollcall-lambda`** — check for errors. A `FileNotFoundError` means csvParser didn't deposit files into `CsvBucket`, or the prefixes don't match.
 4. **CloudWatch → `/aws/lambda/ses-emailer-function`** — check for errors. A `MessageRejected` error typically means the account is still in SES sandbox.
 
-**Output arrives but carry-forward rows are missing or wrong**
-If rows that should be carried forward are absent, the pipeline may have started fresh (no reference file existed). Check that the seed file was committed to `reference-data/` before deploying, and verify the deploy ran `aws s3 sync reference-data/` successfully. If carry-forward state is corrupted, use **Reset Seeding** and re-seed with a known-good output workbook.
+**Output arrives but Removed rows are missing or wrong**
+If a requisition that disappeared from the reports is not showing as "Removed," the pipeline may have started fresh (no reference file existed). Check that the seed file was committed to `reference-data/` before deploying, and verify the deploy ran `aws s3 sync reference-data/` successfully. If carry-forward state is corrupted, use **Reset Seeding** and re-seed with a known-good output workbook. Note that a req already labeled "Removed" in a prior run will not reappear — this is expected behavior.
 
 **Alarm emails are not being received**
 The SNS subscription was not confirmed. Open **SNS console → Topics**, find `Lambda1_Error_Notif` or `Lambda2_Error_Notif`, click **Subscriptions**, and check the status. If it shows `PendingConfirmation`, use **Request confirmation** to resend the confirmation email.
