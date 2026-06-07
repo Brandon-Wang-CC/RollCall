@@ -84,7 +84,11 @@ def test_lambda_handler_decodes_percent_encoded_at_sign():
         bucket="test-depts",
     )
 
-    with patch.object(ses_emailer, "download_file_from_s3", side_effect=fake_download), \
+    mock_s3 = MagicMock()
+    mock_s3.head_object.return_value = {"Metadata": {}}
+
+    with patch.object(ses_emailer, "s3", mock_s3), \
+         patch.object(ses_emailer, "download_file_from_s3", side_effect=fake_download), \
          patch.object(ses_emailer, "send_email_with_attachment",
                       return_value={"MessageId": "msg-1"}), \
          patch.dict(os.environ, {"SENDER_EMAIL": "noreply@example.com"}):
@@ -96,7 +100,7 @@ def test_lambda_handler_decodes_percent_encoded_at_sign():
 def test_lambda_handler_extracts_recipient_from_key_prefix():
     captured = {}
 
-    def fake_send(to_email, subject, body, file_path, filename=None):
+    def fake_send(to_email, subject, body, file_path, filename=None, **kwargs):
         captured["to_email"] = to_email
         return {"MessageId": "msg-2"}
 
@@ -105,7 +109,11 @@ def test_lambda_handler_extracts_recipient_from_key_prefix():
         bucket="test-depts",
     )
 
-    with patch.object(ses_emailer, "download_file_from_s3", return_value="/tmp/fake.xlsx"), \
+    mock_s3 = MagicMock()
+    mock_s3.head_object.return_value = {"Metadata": {}}
+
+    with patch.object(ses_emailer, "s3", mock_s3), \
+         patch.object(ses_emailer, "download_file_from_s3", return_value="/tmp/fake.xlsx"), \
          patch.object(ses_emailer, "send_email_with_attachment", side_effect=fake_send), \
          patch.dict(os.environ, {"SENDER_EMAIL": "noreply@example.com"}):
         ses_emailer.lambda_handler(event, {})
@@ -135,7 +143,11 @@ def test_lambda_handler_happy_path_returns_200_with_message_id():
         bucket="test-depts",
     )
 
-    with patch.object(ses_emailer, "download_file_from_s3", return_value="/tmp/fake.xlsx"), \
+    mock_s3 = MagicMock()
+    mock_s3.head_object.return_value = {"Metadata": {}}
+
+    with patch.object(ses_emailer, "s3", mock_s3), \
+         patch.object(ses_emailer, "download_file_from_s3", return_value="/tmp/fake.xlsx"), \
          patch.object(ses_emailer, "send_email_with_attachment",
                       return_value={"MessageId": "ses-msg-xyz"}), \
          patch.dict(os.environ, {"SENDER_EMAIL": "noreply@example.com"}):
@@ -160,7 +172,11 @@ def test_lambda_handler_passes_bucket_and_decoded_key_to_download():
         bucket="prod-depts-bucket",
     )
 
-    with patch.object(ses_emailer, "download_file_from_s3", side_effect=fake_download), \
+    mock_s3 = MagicMock()
+    mock_s3.head_object.return_value = {"Metadata": {}}
+
+    with patch.object(ses_emailer, "s3", mock_s3), \
+         patch.object(ses_emailer, "download_file_from_s3", side_effect=fake_download), \
          patch.object(ses_emailer, "send_email_with_attachment",
                       return_value={"MessageId": "msg-3"}), \
          patch.dict(os.environ, {"SENDER_EMAIL": "noreply@example.com"}):
@@ -178,7 +194,11 @@ def test_lambda_handler_propagates_s3_download_error():
         bucket="test-depts",
     )
 
-    with patch.object(ses_emailer, "download_file_from_s3",
+    mock_s3 = MagicMock()
+    mock_s3.head_object.return_value = {"Metadata": {}}
+
+    with patch.object(ses_emailer, "s3", mock_s3), \
+         patch.object(ses_emailer, "download_file_from_s3",
                       side_effect=Exception("S3 access denied")):
         with pytest.raises(Exception, match="S3 access denied"):
             ses_emailer.lambda_handler(event, {})
@@ -190,7 +210,11 @@ def test_lambda_handler_propagates_ses_send_error():
         bucket="test-depts",
     )
 
-    with patch.object(ses_emailer, "download_file_from_s3", return_value="/tmp/fake.xlsx"), \
+    mock_s3 = MagicMock()
+    mock_s3.head_object.return_value = {"Metadata": {}}
+
+    with patch.object(ses_emailer, "s3", mock_s3), \
+         patch.object(ses_emailer, "download_file_from_s3", return_value="/tmp/fake.xlsx"), \
          patch.object(ses_emailer, "send_email_with_attachment",
                       side_effect=Exception("SES: Address not verified")):
         with pytest.raises(Exception, match="SES: Address not verified"):

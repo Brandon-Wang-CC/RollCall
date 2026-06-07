@@ -172,6 +172,7 @@ def test_lambda_handler_skips_non_xlsx_attachment():
     assert result["status"] == "success"
     assert result["total_files"] == 1
     assert result["processed_files"] == []
+    mock_sns.publish.assert_called_once()
 
 
 def test_lambda_handler_publishes_sender_as_ret_addr():
