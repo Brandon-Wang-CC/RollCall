@@ -184,21 +184,39 @@ def load_reference_data(bucket_name):
     esf_all_df = pd.read_excel(esf_bytes, sheet_name="ALL")
     logger.info(f"Loaded ESF WF ALL: {len(esf_all_df)} rows")
 
+    # Req numbers seen in any previous run — used so reqs marked NEW in run N
+    # are classified Existing/Open in run N+1 rather than staying NEW forever.
+    prev_req_nums = set()
+    try:
+        prev_response = s3.get_object(Bucket=bucket_name, Key=REF_KEY)
+        prev_bytes = io.BytesIO(prev_response["Body"].read())
+        prev_xl = pd.ExcelFile(prev_bytes)
+        sheet = "Output" if "Output" in prev_xl.sheet_names else (
+                "Reqs"   if "Reqs"   in prev_xl.sheet_names else None)
+        if sheet:
+            prev_df = pd.read_excel(prev_xl, sheet_name=sheet, usecols=["Req #"])
+            prev_req_nums = {_normalize_req(v) for v in prev_df["Req #"] if _normalize_req(v)}
+            logger.info("Loaded %d req numbers from previous run", len(prev_req_nums))
+    except Exception:
+        logger.info("No previous run reference found — all reqs evaluated against static seed only")
+
     logger.info("All reference data loaded!")
     return {
-        "cc_id":    cc_id_df,
-        "depts":    depts_df,
-        "status":   status_df,
-        "esf_reqs": esf_reqs_df,
-        "esf_all":  esf_all_df,
+        "cc_id":          cc_id_df,
+        "depts":          depts_df,
+        "status":         status_df,
+        "esf_reqs":       esf_reqs_df,
+        "esf_all":        esf_all_df,
+        "prev_req_nums":  prev_req_nums,
     }
     
 def build_crew_unfilled(filtered, ref):
     logger.info("Building Crew Unfilled...")
-    df         = filtered["unfilled"].copy()
-    candidates = filtered["candidates"].copy()
-    esf_reqs   = ref["esf_reqs"].copy()
-    cc_id      = ref["cc_id"].copy()
+    df            = filtered["unfilled"].copy()
+    candidates    = filtered["candidates"].copy()
+    esf_reqs      = ref["esf_reqs"].copy()
+    cc_id         = ref["cc_id"].copy()
+    prev_req_nums = ref.get("prev_req_nums", set())
     depts      = ref["depts"].copy()
 
     esf_reqs["Req #"] = pd.to_numeric(esf_reqs["Req #"], errors="coerce")
@@ -227,7 +245,7 @@ def build_crew_unfilled(filtered, ref):
         md2_match = depts[depts["department"] == department]
         md2 = md2_match.iloc[0]["MD-2"] if not md2_match.empty else ""
 
-        existing_v_new = "Existing" if req_num_int in req_check else "NEW"
+        existing_v_new = "Existing" if (req_num_int in req_check or str(req_num_int) in prev_req_nums) else "NEW"
 
         grade_level = row.get("Grade Grouping - GTA", "")
         grade_str   = str(grade_level) if pd.notna(grade_level) else ""
@@ -387,11 +405,12 @@ def build_crew_filled(filtered, ref):
 
 def build_contractor_unfilled(filtered, ref):
     logger.info("Building Contractor Unfilled...")
-    df        = filtered["contractor_open"].copy()
-    esf_reqs  = ref["esf_reqs"].copy()
-    cc_id     = ref["cc_id"].copy()
-    depts     = ref["depts"].copy()
-    status_df = ref["status"].copy()
+    df            = filtered["contractor_open"].copy()
+    esf_reqs      = ref["esf_reqs"].copy()
+    cc_id         = ref["cc_id"].copy()
+    depts         = ref["depts"].copy()
+    status_df     = ref["status"].copy()
+    prev_req_nums = ref.get("prev_req_nums", set())
 
     df.columns = [col.replace("\n", " ").strip() for col in df.columns]
 
@@ -444,7 +463,7 @@ def build_contractor_unfilled(filtered, ref):
                 md2_match = depts[depts["department"] == department]
                 md2 = md2_match.iloc[0]["MD-2"] if not md2_match.empty else ""
 
-            if req_num_str not in req_exists_set:
+            if req_num_str not in req_exists_set and req_num_str not in prev_req_nums:
                 existing_v_new = "NEW"
             else:
                 esf_hire = req_to_hire.get(req_num_str, "")
