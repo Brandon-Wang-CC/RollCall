@@ -66,6 +66,10 @@ def lambda_handler(event, context):
     # S3 URL encoding fix
     key = urllib.parse.unquote_plus(key)
 
+    if "/" not in key:
+        logger.info(f"Skipping non-output key (no email prefix): {key}")
+        return {"statusCode": 200, "body": json.dumps({"skipped": key})}
+
     to_email = key.split("/")[0]
     file_key = key.split("/")[1]
 
