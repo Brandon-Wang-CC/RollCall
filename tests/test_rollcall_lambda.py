@@ -268,8 +268,9 @@ def test_write_output_workbook_carries_forward_old_rows(tmp_path):
          patch.object(rollcall, "TMP_DIR", str(tmp_path)):
         rollcall.write_output_workbook(new_df, empty, empty, empty, "sender@example.com")
 
-    upload_args = mock_s3.upload_file.call_args
-    out_path = upload_args.args[0]
+    # call_args_list[0] = user-facing output (includes Removed rows)
+    # call_args_list[1] = carry-forward seed (Removed rows excluded)
+    out_path = mock_s3.upload_file.call_args_list[0].args[0]
     result = pd.read_excel(out_path, sheet_name="Output")
 
     req_111 = result[result["Req #"].astype(str) == "111"]
@@ -277,6 +278,11 @@ def test_write_output_workbook_carries_forward_old_rows(tmp_path):
     assert len(req_111) == 1
     assert req_111.iloc[0]["Existing v New"] == "Removed"
     assert len(req_222) == 1
+
+    # Removed rows must not be written into the seed — they should not reappear next run
+    ref_path = mock_s3.upload_file.call_args_list[1].args[0]
+    ref_result = pd.read_excel(ref_path, sheet_name="Output")
+    assert len(ref_result[ref_result["Req #"].astype(str) == "111"]) == 0
 
 
 def test_write_output_workbook_seeds_from_reqs_sheet(tmp_path):
@@ -303,11 +309,15 @@ def test_write_output_workbook_seeds_from_reqs_sheet(tmp_path):
          patch.object(rollcall, "TMP_DIR", str(tmp_path)):
         rollcall.write_output_workbook(new_df, empty, empty, empty, "sender@example.com")
 
-    out_path = mock_s3.upload_file.call_args.args[0]
+    out_path = mock_s3.upload_file.call_args_list[0].args[0]
     result = pd.read_excel(out_path, sheet_name="Output")
     req_555 = result[result["Req #"].astype(str) == "555"]
     assert len(req_555) == 1, "row from Reqs sheet should be carried forward"
     assert req_555.iloc[0]["Existing v New"] == "Removed"
+
+    ref_path = mock_s3.upload_file.call_args_list[1].args[0]
+    ref_result = pd.read_excel(ref_path, sheet_name="Output")
+    assert len(ref_result[ref_result["Req #"].astype(str) == "555"]) == 0
 
 
 def test_write_output_workbook_fresh_start_when_no_previous(tmp_path):
@@ -324,7 +334,7 @@ def test_write_output_workbook_fresh_start_when_no_previous(tmp_path):
          patch.object(rollcall, "TMP_DIR", str(tmp_path)):
         rollcall.write_output_workbook(new_df, empty, empty, empty, "sender@example.com")
 
-    out_path = mock_s3.upload_file.call_args.args[0]
+    out_path = mock_s3.upload_file.call_args_list[0].args[0]
     result = pd.read_excel(out_path, sheet_name="Output")
     assert len(result) == 1
 

@@ -837,8 +837,14 @@ def write_output_workbook(crew_unfilled, crew_filled, contractor_unfilled, contr
     s3.upload_file(output_path, DEPTS_BUCKET, key, ExtraArgs={"Metadata": s3_meta} if s3_meta else {})
     logger.info(f"Uploaded output to s3://{DEPTS_BUCKET}/{key}")
 
-    s3.upload_file(output_path, DEPTS_BUCKET, REF_KEY)
-    logger.info(f"Updated reference copy at s3://{DEPTS_BUCKET}/{REF_KEY}")
+    # Removed rows are excluded from the carry-forward seed so they surface exactly
+    # once in the output and never reappear on subsequent runs.
+    ref_df   = combined[combined["Existing v New"] != "Removed"]
+    ref_path = os.path.join(TMP_DIR, "ESF WF data file.ref.xlsx")
+    with pd.ExcelWriter(ref_path, engine="openpyxl") as writer:
+        ref_df.to_excel(writer, sheet_name="Output", index=False)
+    s3.upload_file(ref_path, DEPTS_BUCKET, REF_KEY)
+    logger.info(f"Updated reference copy at s3://{DEPTS_BUCKET}/{REF_KEY} ({len(ref_df)} rows, Removed excluded)")
 
     return output_path
 
