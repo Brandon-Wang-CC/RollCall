@@ -703,7 +703,90 @@ def standardize_df(df):
             df[col] = ""
     return df[MASTER_COLUMNS]
 
-def write_output_workbook(crew_unfilled, crew_filled, contractor_unfilled, contractor_filled, ret_addr):
+
+def _build_req_pivot(combined_df):
+    """Return (main_pivot, ges_pivot) DataFrames for the Req Pivot sheet.
+
+    Main pivot: open reqs by Status (rows) × Department (columns).
+    GES pivot:  GES open reqs by Status (rows) × Worker Type (columns).
+    Rows included: current run only (excludes Carried Forward), non-blank Status.
+    """
+    open_mask = (
+        ~combined_df["Existing v New"].isin(["Carried Forward"]) &
+        combined_df["Status"].notna() &
+        (combined_df["Status"].astype(str).str.strip() != "")
+    )
+    unfilled = combined_df[open_mask].copy()
+
+    if unfilled.empty:
+        logger.info("Req Pivot: no open reqs found, skipping pivot sheets")
+        return pd.DataFrame(), pd.DataFrame()
+
+    unfilled["_fte"] = pd.to_numeric(unfilled["FTE"], errors="coerce").fillna(1)
+
+    main_pivot = unfilled.pivot_table(
+        index="Status",
+        columns="Department",
+        values="_fte",
+        aggfunc="sum",
+        margins=True,
+        margins_name="Grand Total",
+        fill_value=0,
+    )
+    main_pivot.columns.name = "# of FTE"
+    logger.info("Req Pivot: %d status rows × %d dept cols", len(main_pivot) - 1, len(main_pivot.columns) - 1)
+
+    ges = unfilled[unfilled["Department"].astype(str).str.strip() == "GES"]
+    if not ges.empty:
+        ges_pivot = ges.pivot_table(
+            index="Status",
+            columns="Worker Type",
+            values="_fte",
+            aggfunc="sum",
+            margins=True,
+            margins_name="Grand Total",
+            fill_value=0,
+        )
+        ges_pivot.columns.name = "GES"
+    else:
+        ges_pivot = pd.DataFrame()
+
+    return main_pivot, ges_pivot
+
+
+def _build_rc_tables(ref):
+    """Return (cc_table, md2_table) DataFrames for the RC reference sheet.
+
+    cc_table:  CC ID → Department mapping (from cc_id.csv).
+    md2_table: MD-2 name → Department mapping (from depts.csv).
+    """
+    cc_id_df = ref["cc_id"].copy()
+    depts_df  = ref["depts"].copy()
+
+    cc_table = (
+        cc_id_df[["cc_id", "subdepartment"]]
+        .rename(columns={"cc_id": "RC", "subdepartment": "Department"})
+        .dropna(subset=["RC"])
+        .sort_values(["Department", "RC"])
+        .reset_index(drop=True)
+    )
+    cc_table["RC"] = cc_table["RC"].apply(lambda v: int(v) if pd.notna(v) else v)
+
+    if "MD-2" in depts_df.columns and "department" in depts_df.columns:
+        md2_table = (
+            depts_df[["MD-2", "department"]]
+            .rename(columns={"department": "Department"})
+            .dropna(subset=["MD-2"])
+            .sort_values("Department")
+            .reset_index(drop=True)
+        )
+    else:
+        md2_table = pd.DataFrame(columns=["MD-2", "Department"])
+
+    return cc_table, md2_table
+
+
+def write_output_workbook(crew_unfilled, crew_filled, contractor_unfilled, contractor_filled, ret_addr, ref=None):
     logger.info("Writing output workbook...")
     output_path = os.path.join(TMP_DIR, OUTPUT_FILE)
 
@@ -770,8 +853,30 @@ def write_output_workbook(crew_unfilled, crew_filled, contractor_unfilled, contr
     logger.info(f"Combined total: {len(combined)} rows")
 
     # Step 4 — write and upload
+    req_pivot, ges_pivot = _build_req_pivot(combined)
+
     with pd.ExcelWriter(output_path, engine="openpyxl") as writer:
         combined.to_excel(writer, sheet_name="Output", index=False)
+
+        # date tab — single cell showing when this workbook was generated
+        date_df = pd.DataFrame({"Last Updated": [datetime.utcnow().replace(microsecond=0)]})
+        date_df.to_excel(writer, sheet_name="date", index=False)
+
+        # Req Pivot tab — open reqs by Status × Department, plus GES breakdown
+        if not req_pivot.empty:
+            req_pivot.to_excel(writer, sheet_name="Req Pivot", startrow=0, startcol=0)
+            if not ges_pivot.empty:
+                # 1 (index col) + data cols + 2 blank gap cols
+                ges_start_col = 1 + len(req_pivot.columns) + 2
+                ges_pivot.to_excel(writer, sheet_name="Req Pivot", startrow=0, startcol=ges_start_col)
+
+        # RC tab — CC ID → Department and MD-2 → Department reference tables
+        if ref is not None:
+            cc_table, md2_table = _build_rc_tables(ref)
+            cc_table.to_excel(writer, sheet_name="RC", startrow=0, startcol=0, index=False)
+            if not md2_table.empty:
+                md2_start_col = len(cc_table.columns) + 2
+                md2_table.to_excel(writer, sheet_name="RC", startrow=0, startcol=md2_start_col, index=False)
 
     logger.info(f"Output workbook written to '{output_path}'")
     key = f"{ret_addr}/{OUTPUT_KEY}"
@@ -804,7 +909,7 @@ def lambda_handler(event, context):
     contractor_filled   = build_contractor_filled(filtered, ref)
 
     output_path = write_output_workbook(
-        crew_unfilled, crew_filled, contractor_unfilled, contractor_filled, ret_addr
+        crew_unfilled, crew_filled, contractor_unfilled, contractor_filled, ret_addr, ref=ref
     )
 
     elapsed = time.time() - start
