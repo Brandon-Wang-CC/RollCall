@@ -1,0 +1,64 @@
+name: Reset Seeding
+
+run-name: Reset carry-forward seed → ${{ inputs.env }}
+
+on:
+  workflow_dispatch:
+    inputs:
+      env:
+        description: 'Environment to reset'
+        required: true
+        type: choice
+        options:
+          - test
+          - prod
+
+permissions:
+  id-token: write
+  contents: read
+
+jobs:
+  reset:
+    runs-on: ubuntu-latest
+    environment: production
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Read config
+        id: config
+        run: |
+          python3 << 'EOF'
+          import yaml, os
+          config = yaml.safe_load(open('.github/deploy-config.yaml'))
+          settings = yaml.safe_load(open('user-settings.yaml'))
+          with open(os.environ['GITHUB_OUTPUT'], 'a') as f:
+            f.write(f"aws-region={config['aws']['region']}\n")
+            f.write(f"oidc-role-arn={config['aws']['oidcRoleArn']}\n")
+            f.write(f"depts-bucket={settings['DeptsBucket']}\n")
+          EOF
+
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ steps.config.outputs.oidc-role-arn }}
+          aws-region: ${{ steps.config.outputs.aws-region }}
+
+      - name: Delete .ref files from DeptsBucket
+        env:
+          BUCKET: ${{ steps.config.outputs.depts-bucket }}-${{ inputs.env }}
+        run: |
+          keys=$(aws s3api list-objects-v2 --bucket "$BUCKET" \
+            --query "Contents[?ends_with(Key, '.ref')].Key" --output text)
+
+          if [ -z "$keys" ] || [ "$keys" = "None" ]; then
+            echo "No .ref files found in s3://$BUCKET — nothing to do."
+            exit 0
+          fi
+
+          echo "Deleting from s3://$BUCKET:"
+          for key in $keys; do
+            aws s3api delete-object --bucket "$BUCKET" --key "$key"
+            echo "  deleted: $key"
+          done
+          echo "Done. Next pipeline run will bootstrap from the seed file."
