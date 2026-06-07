@@ -638,6 +638,31 @@ def build_contractor_filled(filtered, ref):
 
 OUTPUT_FILE = "ESF WF data file.xlsx"
 OUTPUT_KEY  = "ESF WF data file.xlsx"
+# .ref extension prevents the S3 ObjectCreated trigger (filtered on suffix ".xlsx") from
+# firing ses-emailer when rollcall-lambda refreshes the pipeline-internal reference copy.
+REF_KEY     = "ESF WF data file.ref"
+
+
+def _normalize_req(val):
+    """Normalize a Req # to a consistent string.
+
+    Pandas reads numeric Excel cells as float64, so integer req IDs written as
+    1234567 come back as 1234567.0 and stringify to "1234567.0".  This breaks
+    the isin() match against the current run's "1234567" values, causing rows
+    to be falsely carried forward or silently dropped.
+
+    Numeric-looking values are converted to int-strings ("1234567.0" → "1234567").
+    Non-numeric contractor IDs ("C1234", "CTRC-001") are returned unchanged.
+    """
+    if pd.isna(val):
+        return ""
+    s = str(val).strip()
+    if not s or s == "nan":
+        return ""
+    try:
+        return str(int(float(s)))
+    except (ValueError, TypeError):
+        return s
 
 # Master column order for the combined output
 MASTER_COLUMNS = [
@@ -680,14 +705,14 @@ def standardize_df(df):
             df[col] = ""
     return df[MASTER_COLUMNS]
 
-def write_output_workbook(crew_unfilled, crew_filled, contractor_unfilled, contractor_filled, ret_addr):
+def write_output_workbook(crew_unfilled, crew_filled, contractor_unfilled, contractor_filled, ret_addr, ref=None, orig_message_id="", orig_subject=""):
     logger.info("Writing output workbook...")
     output_path = os.path.join(TMP_DIR, OUTPUT_FILE)
 
     # Step 1 — load previous run from S3
     try:
         logger.info("Loading previous ESF WF data file from S3...")
-        response = s3.get_object(Bucket=DEPTS_BUCKET, Key=OUTPUT_KEY)
+        response = s3.get_object(Bucket=DEPTS_BUCKET, Key=REF_KEY)
         esf_bytes = io.BytesIO(response["Body"].read())
         
         # Check which sheet exists — first run will have "Reqs", subsequent runs "Output"
@@ -702,11 +727,25 @@ def write_output_workbook(crew_unfilled, crew_filled, contractor_unfilled, contr
             logger.info("No recognized sheet found — starting fresh")
             prev_df = pd.DataFrame(columns=MASTER_COLUMNS)
 
-        prev_df["Req #"] = prev_df["Req #"].astype(str).str.strip()
+        prev_df["Req #"] = prev_df["Req #"].map(_normalize_req)
         logger.info(f"Loaded {len(prev_df)} rows from previous run")
     except s3.exceptions.NoSuchKey:
-        logger.info("No previous file found in S3 — starting fresh")
-        prev_df = pd.DataFrame(columns=MASTER_COLUMNS)
+        # Fresh deploy — bootstrap from the static ref file (Reqs sheet) if it exists
+        try:
+            logger.info("No reference file found — bootstrapping from %s", ESF_WF_FILE)
+            response = s3.get_object(Bucket=DEPTS_BUCKET, Key=ESF_WF_FILE)
+            esf_bytes = io.BytesIO(response["Body"].read())
+            xl = pd.ExcelFile(esf_bytes)
+            if "Reqs" in xl.sheet_names:
+                prev_df = pd.read_excel(xl, sheet_name="Reqs")
+                prev_df["Req #"] = prev_df["Req #"].map(_normalize_req)
+                logger.info("Bootstrapped %d rows from %s Reqs sheet", len(prev_df), ESF_WF_FILE)
+            else:
+                logger.info("No Reqs sheet in bootstrap file — starting fresh")
+                prev_df = pd.DataFrame(columns=MASTER_COLUMNS)
+        except s3.exceptions.NoSuchKey:
+            logger.info("No bootstrap file found — starting fresh")
+            prev_df = pd.DataFrame(columns=MASTER_COLUMNS)
 
     # Step 2 — standardize and combine new data
     new_df = pd.concat([
@@ -715,7 +754,7 @@ def write_output_workbook(crew_unfilled, crew_filled, contractor_unfilled, contr
         standardize_df(contractor_unfilled),
         standardize_df(contractor_filled),
     ], ignore_index=True)
-    new_df["Req #"] = new_df["Req #"].astype(str).str.strip()
+    new_df["Req #"] = new_df["Req #"].map(_normalize_req)
     logger.info(f"New data: {len(new_df)} rows")
 
     # Step 3 — merge: new data takes precedence; rows no longer in reports are carried forward
@@ -738,8 +777,15 @@ def write_output_workbook(crew_unfilled, crew_filled, contractor_unfilled, contr
 
     logger.info(f"Output workbook written to '{output_path}'")
     key = f"{ret_addr}/{OUTPUT_KEY}"
-    s3.upload_file(output_path, DEPTS_BUCKET, key)
+    s3_meta = {k: v for k, v in {
+        "original-message-id": orig_message_id,
+        "original-subject":    orig_subject[:500],  # S3 metadata value limit is 2 KB total
+    }.items() if v}
+    s3.upload_file(output_path, DEPTS_BUCKET, key, ExtraArgs={"Metadata": s3_meta} if s3_meta else {})
     logger.info(f"Uploaded output to s3://{DEPTS_BUCKET}/{key}")
+
+    s3.upload_file(output_path, DEPTS_BUCKET, REF_KEY)
+    logger.info(f"Updated reference copy at s3://{DEPTS_BUCKET}/{REF_KEY}")
 
     return output_path
 
@@ -781,13 +827,15 @@ def lambda_handler(event, context):
     logger.info("Lambda handler invoked")
     logger.info(f"Event: {json.dumps(event, indent=2)}")
 
-    ret_addr = None
-    email_subject = ""
+    ret_addr        = None
+    orig_message_id = ""
+    orig_subject    = ""
     try:
-        inner_msg = json.loads(json.loads(event["Records"][0].get("body", "{}")).get("Message", "{}"))
-        ret_addr = inner_msg.get("retAddr")
-        email_subject = inner_msg.get("subject", "")
-        logger.info(f"Return address (output folder): {ret_addr}")
+        sns_payload     = json.loads(json.loads(event["Records"][0].get("body", "{}")).get("Message", "{}"))
+        ret_addr        = sns_payload.get("retAddr")
+        orig_message_id = sns_payload.get("origMessageId", "")
+        orig_subject    = sns_payload.get("origSubject", "")
+        logger.info("Return address: %s | origMessageId: %s | origSubject: %s", ret_addr, orig_message_id, orig_subject)
         discovered  = discover_files(BUCKET_NAME)
         local_files = download_all_files(BUCKET_NAME, discovered)
         filtered    = filter_all_files(local_files)
@@ -803,7 +851,8 @@ def lambda_handler(event, context):
         contractor_filled   = build_contractor_filled(filtered, ref)
 
         output_path = write_output_workbook(
-            crew_unfilled, crew_filled, contractor_unfilled, contractor_filled, ret_addr
+            crew_unfilled, crew_filled, contractor_unfilled, contractor_filled, ret_addr,
+            ref=ref, orig_message_id=orig_message_id, orig_subject=orig_subject,
         )
 
         elapsed = time.time() - start
@@ -821,5 +870,5 @@ def lambda_handler(event, context):
 
     except Exception as e:
         logger.error("Unhandled exception: %s", e, exc_info=True)
-        _send_failure_email(ret_addr, email_subject)
+        _send_failure_email(ret_addr, orig_subject)
         raise

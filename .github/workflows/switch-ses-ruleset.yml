@@ -1,0 +1,65 @@
+name: Switch SES Receipt Rule Set
+
+run-name: Switch SES rule set → ${{ inputs.env }}
+
+on:
+  workflow_dispatch:
+    inputs:
+      env:
+        description: 'Environment rule set to activate'
+        required: true
+        type: choice
+        options:
+          - test
+          - prod
+
+permissions:
+  id-token: write
+  contents: read
+
+jobs:
+  switch:
+    runs-on: ubuntu-latest
+    environment: production
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Read config
+        id: config
+        run: |
+          python3 << 'EOF'
+          import yaml, os
+          config = yaml.safe_load(open('.github/deploy-config.yaml'))
+          with open(os.environ['GITHUB_OUTPUT'], 'a') as f:
+            f.write(f"aws-region={config['aws']['region']}\n")
+            f.write(f"oidc-role-arn={config['aws']['oidcRoleArn']}\n")
+          EOF
+
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ steps.config.outputs.oidc-role-arn }}
+          aws-region: ${{ steps.config.outputs.aws-region }}
+
+      - name: Switch active receipt rule set
+        env:
+          REGION: ${{ steps.config.outputs.aws-region }}
+          TARGET: DeliverToS3-${{ inputs.env }}
+        run: |
+          current=$(aws ses describe-active-receipt-rule-set --region "$REGION" \
+            --query "Metadata.Name" --output text 2>/dev/null || echo "none")
+          echo "Currently active rule set: ${current}"
+
+          if ! aws ses describe-receipt-rule-set --rule-set-name "$TARGET" --region "$REGION" > /dev/null 2>&1; then
+            echo "Error: SES receipt rule set '$TARGET' does not exist." >&2
+            exit 1
+          fi
+
+          if [ "$current" = "$TARGET" ]; then
+            echo "$TARGET is already active — nothing to do."
+            exit 0
+          fi
+
+          aws ses set-active-receipt-rule-set --rule-set-name "$TARGET" --region "$REGION"
+          echo "Done. Active rule set is now: $TARGET"

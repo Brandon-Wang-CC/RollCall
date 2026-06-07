@@ -265,7 +265,7 @@ jobs:
             --region $AWS_REGION \
             --resolve-s3 \
             --capabilities CAPABILITY_NAMED_IAM \
-            --parameter-overrides CsvBucket=$CSV_BUCKET SenderEmail=$SENDER_EMAIL Env="$ENV_SUFFIX" \
+            --parameter-overrides CsvBucket=$CSV_BUCKET SenderEmail=$SENDER_EMAIL Env="$ENV_SUFFIX" FilePrefixUnfilled=$FILE_PREFIX_UNFILLED FilePrefixContractorOpen=$FILE_PREFIX_CONTRACTOR_OPEN FilePrefixCandidates=$FILE_PREFIX_CANDIDATES \
             --no-confirm-changeset \
             --no-fail-on-empty-changeset
 

@@ -25,6 +25,17 @@ SENDER_EMAIL = os.environ.get("SENDER_EMAIL")
 NS = {"main": "http://schemas.openxmlformats.org/spreadsheetml/2006/main"}
 
 
+def _decode(val):
+    return (val or "").replace("*", " ")
+
+
+FILE_PREFIX_UNFILLED        = _decode(os.environ.get("FILE_PREFIX_UNFILLED"))
+FILE_PREFIX_CONTRACTOR_OPEN = _decode(os.environ.get("FILE_PREFIX_CONTRACTOR_OPEN"))
+FILE_PREFIX_CANDIDATES      = _decode(os.environ.get("FILE_PREFIX_CANDIDATES"))
+# Base contractor prefix — same workbook, two sheets (Open/Closed)
+FILE_PREFIX_CONTRACTOR_BASE = FILE_PREFIX_CONTRACTOR_OPEN.rsplit("-Open", 1)[0]
+
+
 def process_file(filename, file_content):
     try:
         if not filename.lower().endswith(".xlsx"):
@@ -165,13 +176,14 @@ def parse_csv_to_rows(csv_bytes):
 
 
 
-def publish_to_sns(ret_addr: str, subject: str = ""):
+def publish_to_sns(ret_addr: str, orig_message_id: str = "", orig_subject: str = ""):
     topic_arn = os.environ.get("SNS_TOPIC_ARN")
     message = {
         "status": "processed",
         "bucket": CSV_BUCKET,
         "retAddr": ret_addr,
-        "subject": subject,
+        "origMessageId": orig_message_id,
+        "origSubject": orig_subject,
     }
     try:
         response = sns_client.publish(
@@ -248,13 +260,18 @@ def lambda_handler(event, context):
     start = time.time()
     logger.info(f"Event received: {json.dumps(event, indent=2)}")
 
-    sender_email = None
-    email_subject = ""
+    sender_email    = None
+    orig_message_id = ""
+    orig_subject    = ""
     try:
         wipe_buckets()
 
-        sender_email = json.loads(json.loads(event["Records"][0]["body"])["Message"])["mail"]["source"]
-        logger.info(f"Email source detected: {sender_email}")
+        first_msg       = json.loads(json.loads(event["Records"][0]["body"])["Message"])
+        sender_email    = first_msg["mail"]["source"]
+        common_headers  = first_msg.get("mail", {}).get("commonHeaders", {})
+        orig_message_id = common_headers.get("messageId", "")
+        orig_subject    = common_headers.get("subject", "")
+        logger.info("Email source: %s | orig messageId: %s | subject: %s", sender_email, orig_message_id, orig_subject)
 
         BLOCKED_SENDERS = {"no-reply-aws@amazon.com"}
         if sender_email in BLOCKED_SENDERS:
@@ -263,6 +280,7 @@ def lambda_handler(event, context):
 
         total_files = 0
         processed_files = []
+        seen_filenames = []
 
         for record in event.get("Records", []):
             sns_message = record["body"]
@@ -277,9 +295,6 @@ def lambda_handler(event, context):
 
             email_obj = _get_object_with_retry(bucket_name, object_key)
             msg = email.message_from_binary_file(email_obj["Body"])
-
-            if not email_subject:
-                email_subject = msg.get("Subject", "")
 
             for part in msg.walk():
                 if "attachment" not in part.get("Content-Disposition", ""):
@@ -296,12 +311,25 @@ def lambda_handler(event, context):
                 total_files += 1
 
                 results = process_file(filename, file_content)
+                if results:
+                    seen_filenames.append(filename)
                 processed_files.extend(results)
 
                 del file_content
 
-        logger.info("Processed %d/%d files: %s", len(processed_files), total_files, processed_files)
-        publish_to_sns(sender_email, email_subject)
+        logger.info("Processed %d attachment(s) → %d output file(s): %s", total_files, len(processed_files), processed_files)
+
+        missing = []
+        if not any(f.startswith(FILE_PREFIX_UNFILLED) for f in seen_filenames):
+            missing.append(f"unfilled report (expected prefix: '{FILE_PREFIX_UNFILLED}')")
+        if not any(f.startswith(FILE_PREFIX_CONTRACTOR_BASE) for f in seen_filenames):
+            missing.append(f"contractor report (expected prefix: '{FILE_PREFIX_CONTRACTOR_BASE}')")
+        if not any(f.startswith(FILE_PREFIX_CANDIDATES) for f in seen_filenames):
+            missing.append(f"candidates report (expected prefix: '{FILE_PREFIX_CANDIDATES}')")
+        if missing:
+            raise ValueError(f"Email is missing required attachments: {'; '.join(missing)}")
+
+        publish_to_sns(sender_email, orig_message_id, orig_subject)
 
         elapsed = time.time() - start
         logger.info("Handler complete in %.2fs", elapsed)
@@ -313,5 +341,5 @@ def lambda_handler(event, context):
 
     except Exception as e:
         logger.error("Unhandled exception: %s", e, exc_info=True)
-        _send_failure_email(sender_email, email_subject)
+        _send_failure_email(sender_email, orig_subject)
         raise

@@ -13,6 +13,15 @@ Parameters:
   SenderEmail:
     Type: String
     Description: Verified SES email address used to send failure notifications
+  FilePrefixUnfilled:
+    Type: String
+    Description: Filename prefix for the unfilled requisitions report
+  FilePrefixContractorOpen:
+    Type: String
+    Description: Filename prefix for the open contractor requisitions report (also identifies the contractor workbook)
+  FilePrefixCandidates:
+    Type: String
+    Description: Filename prefix for the candidate flow report
   Env:
     Type: String
     Default: ""
@@ -37,6 +46,9 @@ Resources:
           SNS_TOPIC_ARN: !Sub arn:aws:sns:${AWS::Region}:${AWS::AccountId}:dataReceived${Env}
           CSV_BUCKET: !Ref CsvBucket
           SENDER_EMAIL: !Ref SenderEmail
+          FILE_PREFIX_UNFILLED: !Ref FilePrefixUnfilled
+          FILE_PREFIX_CONTRACTOR_OPEN: !Ref FilePrefixContractorOpen
+          FILE_PREFIX_CANDIDATES: !Ref FilePrefixCandidates
       Architectures:
         - x86_64
       EphemeralStorage:
