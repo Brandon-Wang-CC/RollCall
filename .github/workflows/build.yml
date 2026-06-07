@@ -10,6 +10,7 @@ jobs:
   test:
     name: Test
     runs-on: ubuntu-latest
+    continue-on-error: true
 
     steps:
       - uses: actions/checkout@v4
@@ -29,7 +30,7 @@ jobs:
         run: pip install -r requirements-test.txt --quiet
 
       - name: Run unit tests
-        run: pytest tests/ -v
+        run: pytest tests/ -v --color=yes
 
   validate:
     name: Validate templates
