@@ -101,9 +101,14 @@ jobs:
             'md1-name':                   settings['MD1Name'],
           }
 
+          SPACE_ENCODED_KEYS = {
+            'file-prefix-unfilled', 'file-prefix-contractor-open',
+            'file-prefix-contractor-closed', 'file-prefix-candidates', 'md1-name',
+          }
           with open(os.environ['GITHUB_OUTPUT'], 'a') as f:
             for k, v in outputs.items():
-              f.write(f'{k}<<__DELIM__\n{v}\n__DELIM__\n')
+              val = str(v).replace(' ', '*') if k in SPACE_ENCODED_KEYS else str(v)
+              f.write(f'{k}={val}\n')
           EOF
 
   # ── Deploy all stacks in dependency order, then run post-deploy steps ────────
@@ -268,6 +273,7 @@ jobs:
           python3 << 'PYEOF'
           import yaml, subprocess, os, sys
           settings = yaml.safe_load(open('user-settings.yaml'))
+          enc = lambda s: s.replace(' ', '*')
           result = subprocess.run([
             'sam', 'deploy',
             '--template-file', '.aws-sam/rollcall-lambda/template.yaml',
@@ -278,11 +284,11 @@ jobs:
             '--parameter-overrides',
               f'CsvBucket={os.environ["CSV_BUCKET"]}',
               f'DeptsBucket={os.environ["DEPTS_BUCKET"]}',
-              f'FilePrefixUnfilled={settings["FilePrefixUnfilled"]}',
-              f'FilePrefixContractorOpen={settings["FilePrefixContractorOpen"]}',
-              f'FilePrefixContractorClosed={settings["FilePrefixContractorClosed"]}',
-              f'FilePrefixCandidates={settings["FilePrefixCandidates"]}',
-              f'MD1Name={settings["MD1Name"]}',
+              f'FilePrefixUnfilled={enc(settings["FilePrefixUnfilled"])}',
+              f'FilePrefixContractorOpen={enc(settings["FilePrefixContractorOpen"])}',
+              f'FilePrefixContractorClosed={enc(settings["FilePrefixContractorClosed"])}',
+              f'FilePrefixCandidates={enc(settings["FilePrefixCandidates"])}',
+              f'MD1Name={enc(settings["MD1Name"])}',
               f'Env={os.environ["ENV_SUFFIX"]}',
             '--no-confirm-changeset',
             '--no-fail-on-empty-changeset',
