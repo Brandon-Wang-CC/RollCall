@@ -31,11 +31,10 @@ jobs:
           python3 << 'EOF'
           import yaml, os
           config = yaml.safe_load(open('.github/deploy-config.yaml'))
-          settings = yaml.safe_load(open('user-settings.yaml'))
           with open(os.environ['GITHUB_OUTPUT'], 'a') as f:
             f.write(f"aws-region={config['aws']['region']}\n")
             f.write(f"oidc-role-arn={config['aws']['oidcRoleArn']}\n")
-            f.write(f"depts-bucket={settings['DeptsBucket']}\n")
+            f.write(f"depts-bucket={config['buckets']['depts']}\n")
           EOF
 
       - name: Configure AWS credentials

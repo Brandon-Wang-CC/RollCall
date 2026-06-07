@@ -46,8 +46,7 @@ jobs:
           python3 << 'EOF'
           import yaml, os
 
-          config   = yaml.safe_load(open('.github/deploy-config.yaml'))
-          settings = yaml.safe_load(open('user-settings.yaml'))
+          config = yaml.safe_load(open('.github/deploy-config.yaml'))
 
           outputs = {
             'aws-region':        config['aws']['region'],
@@ -61,9 +60,9 @@ jobs:
             'stack-csv-parser':  config['stacks']['csvParser'],
             'stack-rollcall':    config['stacks']['rollcallLambda'],
             'stack-ses-emailer': config['stacks']['sesEmailer'],
-            'csv-bucket':        settings['CsvBucket'],
-            'depts-bucket':      settings['DeptsBucket'],
-            'ses-bucket':        settings['SesBucket'],
+            'csv-bucket':        config['buckets']['csv'],
+            'depts-bucket':      config['buckets']['depts'],
+            'ses-bucket':        config['buckets']['ses'],
           }
 
           with open(os.environ['GITHUB_OUTPUT'], 'a') as f:
