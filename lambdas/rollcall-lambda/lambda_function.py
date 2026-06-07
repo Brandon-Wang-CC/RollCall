@@ -26,14 +26,17 @@ DEPTS_BUCKET = os.environ.get("DEPTS_BUCKET")
 TMP_DIR = "/tmp" if os.environ.get("AWS_EXECUTION_ENV") else os.path.join(os.path.dirname(os.path.abspath(__file__)), "tmp")
 
 
+def _decode(val):
+    return (val or "").replace("*", " ")
+
 FILE_PREFIXES = {
-    "unfilled":          os.environ.get("FILE_PREFIX_UNFILLED"),
-    "contractor_open":   os.environ.get("FILE_PREFIX_CONTRACTOR_OPEN"),
-    "contractor_closed": os.environ.get("FILE_PREFIX_CONTRACTOR_CLOSED"),
-    "candidates":        os.environ.get("FILE_PREFIX_CANDIDATES"),
+    "unfilled":          _decode(os.environ.get("FILE_PREFIX_UNFILLED")),
+    "contractor_open":   _decode(os.environ.get("FILE_PREFIX_CONTRACTOR_OPEN")),
+    "contractor_closed": _decode(os.environ.get("FILE_PREFIX_CONTRACTOR_CLOSED")),
+    "candidates":        _decode(os.environ.get("FILE_PREFIX_CANDIDATES")),
 }
 
-MD1_NAME = os.environ.get("MD1_NAME", "")
+MD1_NAME = _decode(os.environ.get("MD1_NAME"))
 
 FILTER_CONFIG = {
     "unfilled": {
@@ -59,31 +62,24 @@ FILTER_CONFIG = {
 # =========================
 # File Discovery
 # =========================
-def get_newest_file_by_prefix(bucket_name, prefix, must_contain=None):
+def get_newest_file_by_prefix(bucket_name, prefix):
     response = s3.list_objects_v2(Bucket=bucket_name)
     logger.info("ListObjectsV2 response: {}".format(response))
     matches = [
         obj for obj in response.get("Contents", [])
-        if obj["Key"].startswith(prefix)
-        and obj["Key"].endswith(".xlsx")
-        and (must_contain is None or must_contain in obj["Key"])
+        if obj["Key"].startswith(prefix) and obj["Key"].endswith(".xlsx")
     ]
     if not matches:
-        raise FileNotFoundError(f"No files found with prefix: {prefix}" + (f", containing: {must_contain}" if must_contain else ""))
+        raise FileNotFoundError(f"No files found with prefix: {prefix}")
     newest = max(matches, key=lambda x: x["LastModified"])
     logger.info(f"Found newest file for '{prefix}': {newest['Key']}")
     return newest["Key"]
 
 def discover_files(bucket_name):
     logger.info("Starting file discovery...")
-    # Contractor open/closed share the same prefix — disambiguate by sheet name in filename.
-    contractor_prefix = FILE_PREFIXES["contractor_open"]
-    files = {
-        "unfilled":          get_newest_file_by_prefix(bucket_name, FILE_PREFIXES["unfilled"]),
-        "candidates":        get_newest_file_by_prefix(bucket_name, FILE_PREFIXES["candidates"]),
-        "contractor_open":   get_newest_file_by_prefix(bucket_name, contractor_prefix, must_contain="-Open-"),
-        "contractor_closed": get_newest_file_by_prefix(bucket_name, contractor_prefix, must_contain="-Closed-"),
-    }
+    files = {}
+    for name, prefix in FILE_PREFIXES.items():
+        files[name] = get_newest_file_by_prefix(bucket_name, prefix)
     logger.info(f"All files discovered: {files}")
     return files
 
