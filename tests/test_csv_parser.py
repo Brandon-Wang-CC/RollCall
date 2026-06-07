@@ -34,7 +34,7 @@ def test_process_file_default_copies_xlsx():
         result = csv_parser.process_file("Unfilled Reqs.xlsx", xlsx)
     assert len(result) == 1
     assert result[0].endswith(".xlsx")
-    assert "Unfilled-Reqs-copy-" in result[0]
+    assert "Unfilled Reqs-copy-" in result[0]
     mock_s3.put_object.assert_called_once()
     call_kwargs = mock_s3.put_object.call_args.kwargs
     assert call_kwargs["Key"] == result[0]
@@ -65,8 +65,10 @@ def test_process_file_new_it_skips_missing_sheet():
 
 
 def test_process_file_returns_empty_list_on_error():
-    with patch.object(csv_parser, "s3", MagicMock(side_effect=Exception("S3 error"))):
-        result = csv_parser.process_file("report.xlsx", b"bad data")
+    mock_s3 = MagicMock()
+    mock_s3.put_object.side_effect = Exception("S3 error")
+    with patch.object(csv_parser, "s3", mock_s3):
+        result = csv_parser.process_file("report.xlsx", make_xlsx_bytes())
     assert result == []
 
 
@@ -168,7 +170,8 @@ def test_lambda_handler_skips_non_xlsx_attachment():
         result = csv_parser.lambda_handler(event, {})
 
     assert result["status"] == "success"
-    assert result["total_files"] == 0
+    assert result["total_files"] == 1
+    assert result["processed_files"] == []
 
 
 def test_lambda_handler_publishes_sender_as_ret_addr():

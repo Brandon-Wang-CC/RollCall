@@ -22,10 +22,12 @@ def make_ref(req_nums=None, cc_map=None, dept_map=None):
     cc_map = cc_map or {1001: "IT Security"}
     dept_map = dept_map or {"IT Security": "CTO Office"}
 
+    _ESF_COLS = ["Req #", "Job Code", "Job Profile", "Comment", "Hire Name", "Start Date"]
     esf_reqs = pd.DataFrame(
         [{"Req #": r, "Job Code": f"JC{r}", "Job Profile": "Engineer",
           "Comment": "", "Hire Name": "", "Start Date": ""}
-         for r in req_nums]
+         for r in req_nums],
+        columns=_ESF_COLS,
     )
     cc_id = pd.DataFrame(
         [{"cc_id": k, "subdepartment": v} for k, v in cc_map.items()]
@@ -91,7 +93,7 @@ def test_find_header_row_detects_correct_row():
         ws.append(["Another junk row"])
         ws.append(["Subdivision", "Requisition Number", "Cost Center ID"])
         wb.save(path)
-        row = rollcall.find_header_row(path, ["Subdivision", "Requisition Number"])
+        row = rollcall.find_header_row(path, ["Subdivision", "Requisition Number"], sheet_name=0)
     finally:
         os.unlink(path)
     # Header is in row index 2 (0-based), so find_header_row returns 3
@@ -107,7 +109,7 @@ def test_find_header_row_raises_when_not_found():
         ws.append(["Col A", "Col B"])
         wb.save(path)
         with pytest.raises(ValueError, match="header row"):
-            rollcall.find_header_row(path, ["Missing Column"])
+            rollcall.find_header_row(path, ["Missing Column"], sheet_name=0)
     finally:
         os.unlink(path)
 
@@ -278,9 +280,10 @@ def test_write_output_workbook_carries_forward_old_rows(tmp_path):
 
 
 def test_write_output_workbook_fresh_start_when_no_previous(tmp_path):
+    NoSuchKey = type("NoSuchKey", (Exception,), {})
     mock_s3 = MagicMock()
-    mock_s3.get_object.side_effect = type("NoSuchKey", (Exception,), {})()
-    mock_s3.exceptions.NoSuchKey = type("NoSuchKey", (Exception,), {})
+    mock_s3.get_object.side_effect = NoSuchKey()
+    mock_s3.exceptions.NoSuchKey = NoSuchKey
 
     new_df = pd.DataFrame([{"Req #": "999"}])
     empty = pd.DataFrame(columns=rollcall.MASTER_COLUMNS)
