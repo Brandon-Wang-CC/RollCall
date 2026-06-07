@@ -10,6 +10,15 @@ Parameters:
   CsvBucket:
     Type: String
     Description: S3 bucket to write processed XLSX attachments to
+  FilePrefixUnfilled:
+    Type: String
+    Description: Filename prefix for the unfilled requisitions report
+  FilePrefixContractorOpen:
+    Type: String
+    Description: Filename prefix for the open contractor requisitions report (also identifies the contractor workbook)
+  FilePrefixCandidates:
+    Type: String
+    Description: Filename prefix for the candidate flow report
   Env:
     Type: String
     Default: ""
@@ -33,6 +42,9 @@ Resources:
         Variables:
           SNS_TOPIC_ARN: !Sub arn:aws:sns:${AWS::Region}:${AWS::AccountId}:dataReceived${Env}
           CSV_BUCKET: !Ref CsvBucket
+          FILE_PREFIX_UNFILLED: !Ref FilePrefixUnfilled
+          FILE_PREFIX_CONTRACTOR_OPEN: !Ref FilePrefixContractorOpen
+          FILE_PREFIX_CANDIDATES: !Ref FilePrefixCandidates
       Architectures:
         - x86_64
       EphemeralStorage:
