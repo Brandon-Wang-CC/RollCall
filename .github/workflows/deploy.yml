@@ -9,7 +9,6 @@ on:
         type: choice
         options:
           - eng
-          - test
           - prod
   workflow_run:
     workflows: ["Build"]
