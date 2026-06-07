@@ -1,5 +1,6 @@
 import json
 import os
+import time
 import boto3
 import logging
 from datetime import datetime
@@ -22,7 +23,10 @@ def parse_event(event):
 
 
 def download_file_from_s3(bucket, key, local_path="/tmp/report.xlsx"):
+    logger.info(f"Downloading s3://{bucket}/{key} → {local_path}")
     s3.download_file(bucket, key, local_path)
+    size_kb = os.path.getsize(local_path) / 1024
+    logger.info(f"Downloaded {size_kb:.1f} KB")
     return local_path
 
 
@@ -55,7 +59,9 @@ def send_email_with_attachment(to_email, subject, body, file_path, filename=None
 
 
 def lambda_handler(event, context):
+    start = time.time()
     logger.info(f"Event: {json.dumps(event, indent=2)}")
+    logger.info(f"SENDER_EMAIL: {os.environ.get('SENDER_EMAIL')}")
 
     record = event["Records"][0]
 
@@ -73,7 +79,7 @@ def lambda_handler(event, context):
     to_email = key.split("/")[0]
     file_key = key.split("/")[1]
 
-    logger.info(f"Emailing {file_key} from {bucket}/{key} to {to_email}")
+    logger.info(f"Recipient: {to_email} | File: {file_key} | Source: s3://{bucket}/{key}")
 
     subject = "Pipeline Complete"
     body = "See attached file."
@@ -93,7 +99,8 @@ def lambda_handler(event, context):
         file_path=local_file,
         filename=attachment_name,
     )
-    logger.info(f"Email sent: {response}")
+    elapsed = time.time() - start
+    logger.info(f"Email sent to {to_email} | SES MessageId: {response['MessageId']} | elapsed: {elapsed:.2f}s")
 
     return {
         "statusCode": 200,
