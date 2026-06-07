@@ -88,14 +88,3 @@ ESF WF data file.xlsx
 ```
 
 This file contains the consolidated workforce data generated from the latest Workday reports.
-
-### Existing v New column
-
-Each row is classified with one of four values:
-
-| Value | Meaning |
-|-------|---------|
-| `NEW` | Req number has never appeared in any previous pipeline run |
-| `Existing` | Req is known; no changes detected since the last run |
-| `Updated` | Req is known but the hire name or start date has changed |
-| `Removed` | Req was present in the previous run but is absent from the current reports |

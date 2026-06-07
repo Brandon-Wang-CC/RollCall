@@ -391,9 +391,9 @@ def build_crew_filled(filtered, ref):
                     return None
 
             if str(esf_hire) != str(hire_name):
-                existing_v_new = "Updated"
+                existing_v_new = "Update"
             elif _to_date(esf_start) != _to_date(start_date):
-                existing_v_new = "Updated"
+                existing_v_new = "Update Date"
             else:
                 existing_v_new = "Existing"
         else:
@@ -659,7 +659,7 @@ def build_contractor_filled(filtered, ref):
         state = _US_STATES.get(loc, loc)
 
         rows.append({
-            "Existing v New":                              "Existing",
+            "Existing v New":                              "Filled",
             "Status":                                      col_a_status,
             "Department":                                  department,
             "Worker Type":                                 "Contractor" if cost_center else "",
