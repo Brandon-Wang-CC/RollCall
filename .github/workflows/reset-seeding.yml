@@ -1,6 +1,6 @@
 name: Reset Seeding
 
-run-name: Reset carry-forward seed → ${{ inputs.env }}
+run-name: Reset carry-forward seed → ${{ inputs.env }} (${{ github.ref_name }}) — ${{ github.event.head_commit.message || github.sha }}
 
 on:
   workflow_dispatch:

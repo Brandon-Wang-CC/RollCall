@@ -6,6 +6,7 @@ import io
 import botocore.exceptions
 import os
 import pandas as pd
+import openpyxl
 import email.mime.text
 from datetime import datetime, timedelta
 
@@ -32,6 +33,22 @@ FILE_PREFIXES = {
 }
 
 MD1_NAME = _decode(os.environ.get("MD1_NAME"))
+
+_US_STATES = {
+    "AL": "Alabama", "AK": "Alaska", "AZ": "Arizona", "AR": "Arkansas",
+    "CA": "California", "CO": "Colorado", "CT": "Connecticut", "DE": "Delaware",
+    "FL": "Florida", "GA": "Georgia", "HI": "Hawaii", "ID": "Idaho",
+    "IL": "Illinois", "IN": "Indiana", "IA": "Iowa", "KS": "Kansas",
+    "KY": "Kentucky", "LA": "Louisiana", "ME": "Maine", "MD": "Maryland",
+    "MA": "Massachusetts", "MI": "Michigan", "MN": "Minnesota", "MS": "Mississippi",
+    "MO": "Missouri", "MT": "Montana", "NE": "Nebraska", "NV": "Nevada",
+    "NH": "New Hampshire", "NJ": "New Jersey", "NM": "New Mexico", "NY": "New York",
+    "NC": "North Carolina", "ND": "North Dakota", "OH": "Ohio", "OK": "Oklahoma",
+    "OR": "Oregon", "PA": "Pennsylvania", "RI": "Rhode Island", "SC": "South Carolina",
+    "SD": "South Dakota", "TN": "Tennessee", "TX": "Texas", "UT": "Utah",
+    "VT": "Vermont", "VA": "Virginia", "WA": "Washington", "WV": "West Virginia",
+    "WI": "Wisconsin", "WY": "Wyoming", "DC": "District of Columbia",
+}
 
 FILTER_CONFIG = {
     "unfilled": {
@@ -95,11 +112,16 @@ def download_all_files(bucket_name, discovered_files):
 
 def find_header_row(local_path, known_columns, sheet_name=None):
     logger.info(f"Searching for header row in '{local_path}'...")
-    df = pd.read_excel(local_path, sheet_name=sheet_name, header=None)
-    for i, row in df.iterrows():
-        if all(col in row.values for col in known_columns):
-            logger.info(f"Header row found at row {i + 1}")
-            return i + 1
+    known_set = set(known_columns)
+    wb = openpyxl.load_workbook(local_path, read_only=True, data_only=True)
+    try:
+        ws = wb[sheet_name] if sheet_name else wb.active
+        for i, row in enumerate(ws.iter_rows(values_only=True), start=1):
+            if known_set.issubset({v for v in row if v is not None}):
+                logger.info(f"Header row found at row {i}")
+                return i
+    finally:
+        wb.close()
     raise ValueError(f"Could not find header row containing all of: {known_columns}")
 
 def load_and_filter(local_path, sheet_name, anchor_columns, filter_column, filter_value):
@@ -358,10 +380,19 @@ def build_crew_filled(filtered, ref):
             esf_hire    = esf_row.get("Hire Name", "")
             esf_start   = esf_row.get("Start Date", "")
 
-            # "Update" if hire name or start date changed since the last ESF snapshot
+            # "Update" if hire name or start date changed since the last ESF snapshot.
+            # Normalize both sides to date objects before comparing to avoid false
+            # positives from Timestamp vs. float serial-number serialization differences.
+            def _to_date(v):
+                try:
+                    ts = pd.to_datetime(v, errors="coerce")
+                    return ts.date() if not pd.isna(ts) else None
+                except Exception:
+                    return None
+
             if str(esf_hire) != str(hire_name):
                 existing_v_new = "Update"
-            elif str(esf_start) != str(start_date):
+            elif _to_date(esf_start) != _to_date(start_date):
                 existing_v_new = "Update Date"
             else:
                 existing_v_new = "Existing"
@@ -460,13 +491,21 @@ def build_contractor_unfilled(filtered, ref):
                 md2_match = depts[depts["department"] == department]
                 md2 = md2_match.iloc[0]["MD-2"] if not md2_match.empty else ""
 
+            # Match original formula: NEW / Open / Filled (three states)
+            # "Open" = in ESF Reqs but no hire name recorded yet
+            # "Filled" = in ESF Reqs with a hire name
             if req_num_str not in req_exists_set and req_num_str not in prev_req_nums:
                 existing_v_new = "NEW"
             else:
-                existing_v_new = "Existing"
+                esf_hire_val = ""
+                if req_num_str in req_exists_set:
+                    esf_row_match = esf_reqs[esf_reqs["Req #"] == req_num_str]
+                    if not esf_row_match.empty and "Hire Name" in esf_reqs.columns:
+                        esf_hire_val = str(esf_row_match.iloc[0].get("Hire Name", "")).strip()
+                existing_v_new = "Filled" if esf_hire_val and esf_hire_val.lower() != "nan" else "Open"
 
             loc = str(row.get("LOC", "")).strip()
-            state = {"PA": "Pennsylvania", "TX": "Texas"}.get(loc, loc)
+            state = _US_STATES.get(loc, loc)
 
             report_status = row.get("Status (Please Make a Selection from List)", "")
             short_status = status_map.get(str(report_status), "")
@@ -478,14 +517,14 @@ def build_contractor_unfilled(filtered, ref):
                 "Job Code":                                    "",
                 "Job Profile":                                 row.get("Job Title (Standardized)", ""),
                 "Cost Center ID":                              cost_center,
-                "Grade Level":                                 row.get("Grade Level", ""),
-                "Management":                                  row.get("Management", ""),
+                "Grade Level":                                 row.get("Grade Level", "00"),
+                "Management":                                  row.get("Management", "Non-Management"),
                 "Manager Name":                                row.get("Hiring Manager", ""),
-                "MD-1":                                        row.get("MD-1", ""),
+                "MD-1":                                        row.get("MD-1", MD1_NAME),
                 "MD-2":                                        md2,
                 "Status":                                      short_status,
                 "Req #":                                       req_num_str,
-                "FTE":                                         row.get("FTE", ""),
+                "FTE":                                         row.get("FTE", 1),
                 "Location":                                    row.get("LOC", ""),
                 "Note":                                        "",
                 "Hire Name":                                   "",
@@ -525,11 +564,12 @@ def build_contractor_filled(filtered, ref):
     status_col = "Status (Please Make a Selection from List)"
 
     # Apply filters:
-    # Start Date >= NOW()-10, Filled/Cancelled = "F" (case-insensitive)
+    # Start Date >= NOW()-10 OR Start Date unparseable (invalid/missing dates surface for review)
+    # Filled/Cancelled = "F" (case-insensitive)
     cutoff_date = pd.Timestamp.today() - pd.Timedelta(days=10)
     df["Start Date"] = pd.to_datetime(df["Start Date"], errors="coerce")
     df = df[
-        (df["Start Date"] >= cutoff_date) &
+        ((df["Start Date"] >= cutoff_date) | df["Start Date"].isna()) &
         (df[filled_col].astype(str).str.upper().str.strip() == "F")
     ].copy()
 
@@ -616,24 +656,24 @@ def build_contractor_filled(filtered, ref):
         short_status      = status_map.get(str(contractor_status), "")
 
         loc   = str(row.get("LOC", "")).strip()
-        state = {"PA": "Pennsylvania", "TX": "Texas"}.get(loc, loc)
+        state = _US_STATES.get(loc, loc)
 
         rows.append({
-            "Existing v New":                              "",
+            "Existing v New":                              "Filled",
             "Status":                                      col_a_status,
             "Department":                                  department,
             "Worker Type":                                 "Contractor" if cost_center else "",
             "Job Code":                                    "",
             "Job Profile":                                 row.get("Job Tile (Standardized)", ""),
             "Cost Center ID":                              cost_center,
-            "Grade Level":                                 row.get("Grade Level", ""),
-            "Management":                                  row.get("Management", ""),
+            "Grade Level":                                 row.get("Grade Level", "00"),
+            "Management":                                  row.get("Management", "Non-Management"),
             "Manager Name":                                manager,
-            "MD-1":                                        row.get("MD-1", ""),
+            "MD-1":                                        row.get("MD-1", MD1_NAME),
             "MD-2":                                        md2,
             "Req Status":                                  short_status,
             "Req #":                                       req_num_str,
-            "FTE":                                         row.get("FTE", ""),
+            "FTE":                                         row.get("FTE", 1),
             "Location":                                    row.get("LOC", ""),
             "Note":                                        "",
             "Hire Name":                                   hire_name,

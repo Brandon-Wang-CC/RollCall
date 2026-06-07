@@ -1,6 +1,6 @@
 name: Switch SES Receipt Rule Set
 
-run-name: Switch SES rule set → ${{ inputs.env }}
+run-name: Switch SES rule set → ${{ inputs.env }} (${{ github.ref_name }}) — ${{ github.event.head_commit.message || github.sha }}
 
 on:
   workflow_dispatch:
