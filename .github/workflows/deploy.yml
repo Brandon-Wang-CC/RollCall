@@ -265,23 +265,30 @@ jobs:
 
       - name: Deploy rollcall-lambda
         run: |
-          sam deploy \
-            --template-file .aws-sam/rollcall-lambda/template.yaml \
-            --stack-name $STACK_ROLLCALL \
-            --region $AWS_REGION \
-            --resolve-s3 \
-            --capabilities CAPABILITY_NAMED_IAM \
-            --parameter-overrides \
-              CsvBucket=$CSV_BUCKET \
-              DeptsBucket=$DEPTS_BUCKET \
-              FilePrefixUnfilled="$FILE_PREFIX_UNFILLED" \
-              FilePrefixContractorOpen="$FILE_PREFIX_CONTRACTOR_OPEN" \
-              FilePrefixContractorClosed="$FILE_PREFIX_CONTRACTOR_CLOSED" \
-              FilePrefixCandidates="$FILE_PREFIX_CANDIDATES" \
-              MD1Name="$MD1_NAME" \
-              Env="$ENV_SUFFIX" \
-            --no-confirm-changeset \
-            --no-fail-on-empty-changeset
+          python3 << 'PYEOF'
+          import yaml, subprocess, os, sys
+          settings = yaml.safe_load(open('user-settings.yaml'))
+          result = subprocess.run([
+            'sam', 'deploy',
+            '--template-file', '.aws-sam/rollcall-lambda/template.yaml',
+            '--stack-name',    os.environ['STACK_ROLLCALL'],
+            '--region',        os.environ['AWS_REGION'],
+            '--resolve-s3',
+            '--capabilities',  'CAPABILITY_NAMED_IAM',
+            '--parameter-overrides',
+              f'CsvBucket={os.environ["CSV_BUCKET"]}',
+              f'DeptsBucket={os.environ["DEPTS_BUCKET"]}',
+              f'FilePrefixUnfilled={settings["FilePrefixUnfilled"]}',
+              f'FilePrefixContractorOpen={settings["FilePrefixContractorOpen"]}',
+              f'FilePrefixContractorClosed={settings["FilePrefixContractorClosed"]}',
+              f'FilePrefixCandidates={settings["FilePrefixCandidates"]}',
+              f'MD1Name={settings["MD1Name"]}',
+              f'Env={os.environ["ENV_SUFFIX"]}',
+            '--no-confirm-changeset',
+            '--no-fail-on-empty-changeset',
+          ])
+          sys.exit(result.returncode)
+          PYEOF
 
       - name: Deploy ses-emailer
         run: |
