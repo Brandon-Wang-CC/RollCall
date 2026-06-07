@@ -248,7 +248,7 @@ def build_crew_unfilled(filtered, ref):
         md2_match = depts[depts["department"] == department]
         md2 = md2_match.iloc[0]["MD-2"] if not md2_match.empty else ""
 
-        existing_v_new = "Existing" if (req_num_int in req_check or str(req_num_int) in prev_req_nums) else "NEW"
+        existing_v_new = "Existing" if (req_num_int in req_check or str(req_num_int) in prev_req_nums) else "New"
 
         grade_level = row.get("Grade Grouping - GTA", "")
         grade_str   = str(grade_level) if pd.notna(grade_level) else ""
@@ -360,9 +360,9 @@ def build_crew_filled(filtered, ref):
 
             # "Update" if hire name or start date changed since the last ESF snapshot
             if str(esf_hire) != str(hire_name):
-                existing_v_new = "Update"
+                existing_v_new = "Updated"
             elif str(esf_start) != str(start_date):
-                existing_v_new = "Update Date"
+                existing_v_new = "Updated"
             else:
                 existing_v_new = "Existing"
         else:
@@ -461,7 +461,7 @@ def build_contractor_unfilled(filtered, ref):
                 md2 = md2_match.iloc[0]["MD-2"] if not md2_match.empty else ""
 
             if req_num_str not in req_exists_set and req_num_str not in prev_req_nums:
-                existing_v_new = "NEW"
+                existing_v_new = "New"
             else:
                 existing_v_new = "Existing"
 
@@ -619,7 +619,7 @@ def build_contractor_filled(filtered, ref):
         state = {"PA": "Pennsylvania", "TX": "Texas"}.get(loc, loc)
 
         rows.append({
-            "Existing v New":                              "",
+            "Existing v New":                              "Existing",
             "Status":                                      col_a_status,
             "Department":                                  department,
             "Worker Type":                                 "Contractor" if cost_center else "",
@@ -774,7 +774,7 @@ def write_output_workbook(crew_unfilled, crew_filled, contractor_unfilled, contr
     new_req_nums = set(new_df["Req #"].dropna())
 
     carried_forward = prev_df[~prev_df["Req #"].isin(new_req_nums)].copy()
-    carried_forward["Existing v New"] = "Carried Forward"
+    carried_forward["Existing v New"] = "Removed"
     logger.info(f"Carried forward from previous run: {len(carried_forward)} rows")
 
     combined = pd.concat([new_df, carried_forward], ignore_index=True)
