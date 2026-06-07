@@ -9,6 +9,15 @@ Parameters:
 
 Resources:
 
+  # Receives pipeline failure events from rollcall-lambda (and rollcall-dlq handler); triggers ses-emailer
+  SESEmailerFailureQueue:
+    Type: AWS::SQS::Queue
+    Properties:
+      QueueName: !Sub "ses-emailer-failure-queue${Env}"
+      VisibilityTimeout: 300
+      MessageRetentionPeriod: 345600
+      SqsManagedSseEnabled: true
+
   # Dead-letter queue for CSV-Parser-queue (maxReceiveCount: 3)
   CSVParserDLQ:
     Type: AWS::SQS::Queue
@@ -123,3 +132,8 @@ Outputs:
     Value: !GetAtt CSVParserDLQ.Arn
     Export:
       Name: !Sub "csv-parser-dlq-arn${Env}"
+
+  SESEmailerFailureQueueArn:
+    Value: !GetAtt SESEmailerFailureQueue.Arn
+    Export:
+      Name: !Sub "ses-emailer-failure-queue-arn${Env}"

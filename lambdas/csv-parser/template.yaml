@@ -45,6 +45,11 @@ Resources:
             BatchSize: 1
             FunctionResponseTypes:
               - ReportBatchItemFailures
+        DLQTrigger:
+          Type: SQS
+          Properties:
+            Queue: !Sub arn:aws:sqs:${AWS::Region}:${AWS::AccountId}:csv-parser-dlq${Env}
+            BatchSize: 1
       LoggingConfig:
         LogFormat: Text
         LogGroup: !Sub /aws/lambda/csvParser${Env}

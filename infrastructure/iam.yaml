@@ -71,7 +71,9 @@ Resources:
                   - sqs:DeleteMessage
                   - sqs:ReceiveMessage
                   - sqs:GetQueueAttributes
-                Resource: !Sub arn:aws:sqs:${AWS::Region}:${AWS::AccountId}:CSV-Parser-queue${Env}
+                Resource:
+                  - !Sub arn:aws:sqs:${AWS::Region}:${AWS::AccountId}:CSV-Parser-queue${Env}
+                  - !Sub arn:aws:sqs:${AWS::Region}:${AWS::AccountId}:csv-parser-dlq${Env}
 
   # ─── rollcall-lambda ─────────────────────────────────────────────────────────
 
@@ -148,10 +150,22 @@ Resources:
                   ArnLike:
                     AWS:SourceArn: !Sub arn:aws:s3:::${DeptsBucket}
               - Effect: Allow
-                Action: ses:SendRawEmail
+                Action:
+                  - ses:SendEmail
+                  - ses:SendRawEmail
                 Resource:
                   - !Sub arn:aws:ses:${AWS::Region}:${AWS::AccountId}:identity/${SenderDomain}
                   - !Sub arn:aws:ses:${AWS::Region}:${AWS::AccountId}:identity/*
+        - PolicyName: SQSFailureQueue
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Effect: Allow
+                Action:
+                  - sqs:ReceiveMessage
+                  - sqs:DeleteMessage
+                  - sqs:GetQueueAttributes
+                Resource: !Sub arn:aws:sqs:${AWS::Region}:${AWS::AccountId}:ses-emailer-failure-queue${Env}
 
   # ─── SES → S3 write role ─────────────────────────────────────────────────────
 

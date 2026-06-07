@@ -163,15 +163,14 @@ def parse_csv_to_rows(csv_bytes):
 
 
 
-def publish_to_sns(object_key: str):
+def publish_to_sns(ret_addr: str, subject: str = ""):
     topic_arn = os.environ.get("SNS_TOPIC_ARN")
-
     message = {
         "status": "processed",
         "bucket": CSV_BUCKET,
-        "retAddr": object_key
+        "retAddr": ret_addr,
+        "subject": subject,
     }
-
     try:
         response = sns_client.publish(
             TopicArn=topic_arn,
@@ -179,9 +178,51 @@ def publish_to_sns(object_key: str):
             Subject="New XLSX File Processed"
         )
         logger.info("Published SNS message: %s", response["MessageId"])
-
     except Exception as e:
         logger.error("Error publishing to SNS: %s", e)
+
+
+def _handle_dlq_event(event):
+    """Triggered by csv-parser-dlq after all SQS retries are exhausted.
+    Publishes a failure event to dataReceived SNS so rollcall-lambda can forward it to ses-emailer."""
+    record = event["Records"][0]
+    sender_email = ""
+    original_subject = ""
+    try:
+        outer = json.loads(record["body"])
+        inner = json.loads(outer.get("Message", "{}"))
+        sender_email = inner.get("mail", {}).get("source", "")
+        original_subject = (
+            inner.get("mail", {}).get("commonHeaders", {}).get("subject", "")
+        )
+    except Exception as e:
+        logger.error("Could not parse DLQ message to extract sender: %s", e)
+
+    failure_event = {
+        "type": "pipeline_failure",
+        "failedIn": os.environ.get("AWS_LAMBDA_FUNCTION_NAME", "csvParser"),
+        "timestamp": datetime.utcnow().strftime("%Y-%m-%dT%H:%M:%SZ"),
+        "error": (
+            "Lambda invocation failed after exhausting all retry attempts. "
+            "See CloudWatch Logs for details."
+        ),
+        "sender": sender_email,
+        "subject": original_subject,
+    }
+
+    topic_arn = os.environ.get("SNS_TOPIC_ARN")
+    try:
+        response = sns_client.publish(
+            TopicArn=topic_arn,
+            Message=json.dumps(failure_event),
+            Subject="Pipeline Failure",
+        )
+        logger.info("Published failure event for sender %s (SNS: %s)", sender_email, response["MessageId"])
+    except Exception as e:
+        logger.error("Could not publish failure event to SNS: %s", e)
+        raise
+
+    return {"status": "failure_event_published", "sender": sender_email}
 
 
 
@@ -213,6 +254,10 @@ def lambda_handler(event, context):
     start = time.time()
     logger.info(f"Event received: {json.dumps(event, indent=2)}")
 
+    # Route DLQ events to the failure handler instead of normal processing
+    if "dlq" in event["Records"][0].get("eventSourceARN", "").lower():
+        return _handle_dlq_event(event)
+
     sender_email = None
     try:
         wipe_buckets()
@@ -227,6 +272,7 @@ def lambda_handler(event, context):
 
         total_files = 0
         processed_files = []
+        email_subject = ""
 
         for record in event.get("Records", []):
             sns_message = record["body"]
@@ -241,6 +287,9 @@ def lambda_handler(event, context):
 
             email_obj = _get_object_with_retry(bucket_name, object_key)
             msg = email.message_from_binary_file(email_obj["Body"])
+
+            if not email_subject:
+                email_subject = msg.get("Subject", "")
 
             for part in msg.walk():
                 if "attachment" not in part.get("Content-Disposition", ""):
@@ -262,7 +311,7 @@ def lambda_handler(event, context):
                 del file_content
 
         logger.info("Processed %d/%d files: %s", len(processed_files), total_files, processed_files)
-        publish_to_sns(sender_email)
+        publish_to_sns(sender_email, email_subject)
 
         elapsed = time.time() - start
         logger.info("Handler complete in %.2fs", elapsed)

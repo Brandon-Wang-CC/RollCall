@@ -38,6 +38,59 @@ def _notify_failure(to_email, error_msg):
         logger.error("Could not send failure notification to %s: %s", to_email, e)
 
 
+def _handle_failure_event(record):
+    """Receive a pipeline failure event from SQS and send a polite failure email to the original sender."""
+    try:
+        failure_event = json.loads(record["body"])
+    except Exception as e:
+        logger.error("Could not parse failure event body: %s", e)
+        raise
+
+    sender      = failure_event.get("sender", "")
+    failed_in   = failure_event.get("failedIn", "unknown")
+    timestamp   = failure_event.get("timestamp", "")
+    error       = failure_event.get("error", "An unexpected error occurred.")
+    orig_subject = failure_event.get("subject", "")
+
+    if not sender:
+        logger.warning("No sender email in failure event — skipping notification")
+        return {"statusCode": 200, "body": json.dumps({"skipped": "no sender"})}
+
+    subject_ref = f'"{orig_subject}"' if orig_subject else "your pipeline run"
+    subject_line = f"RollCall Pipeline Error — {subject_ref}"
+
+    body_lines = [
+        "Hello,",
+        "",
+        f"Unfortunately, {subject_ref} could not be completed.",
+        "",
+        "Details:",
+    ]
+    if orig_subject:
+        body_lines.append(f"  Original email:  {orig_subject}")
+    body_lines += [
+        f"  Failed in:       {failed_in}",
+        f"  Time:            {timestamp}",
+        f"  Details:         {error}",
+        "",
+        "If this continues, please contact your administrator.",
+        "",
+        "— RollCall",
+    ]
+
+    logger.info("Sending failure notification to %s (failedIn: %s)", sender, failed_in)
+    ses.send_email(
+        Source=os.environ.get("SENDER_EMAIL", ""),
+        Destination={"ToAddresses": [sender]},
+        Message={
+            "Subject": {"Data": subject_line},
+            "Body":    {"Text": {"Data": "\n".join(body_lines)}},
+        },
+    )
+    logger.info("Failure notification sent to %s", sender)
+    return {"statusCode": 200, "body": json.dumps({"notified": sender, "failedIn": failed_in})}
+
+
 def parse_event(event):
     record = event["Records"][0]
     body = record.get("body")
@@ -83,10 +136,14 @@ def lambda_handler(event, context):
     logger.info(f"Event: {json.dumps(event, indent=2)}")
     logger.info(f"SENDER_EMAIL: {os.environ.get('SENDER_EMAIL')}")
 
+    record = event["Records"][0]
+
+    # SQS failure queue → send failure notification email (no recursive _notify_failure)
+    if record.get("eventSource") == "aws:sqs":
+        return _handle_failure_event(record)
+
     to_email = None
     try:
-        record = event["Records"][0]
-
         bucket = record["s3"]["bucket"]["name"]
         key = record["s3"]["object"]["key"]
 
