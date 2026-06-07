@@ -121,24 +121,23 @@ jobs:
 
     env:
       AWS_REGION:        ${{ needs.load-config.outputs.aws-region }}
-      # For prod: ENV_SUFFIX="" and stack names have no suffix (existing prod stacks).
-      # For all other envs: ENV_SUFFIX="-<env>" and stack names get the same suffix,
-      # keeping each environment's CloudFormation stacks fully isolated.
-      ENV_SUFFIX:        ${{ inputs.env != 'prod' && format('-{0}', inputs.env || 'eng') || '' }}
-      CSV_BUCKET:        ${{ needs.load-config.outputs.csv-bucket }}${{ inputs.env != 'prod' && format('-{0}', inputs.env || 'eng') || '' }}
-      DEPTS_BUCKET:      ${{ needs.load-config.outputs.depts-bucket }}${{ inputs.env != 'prod' && format('-{0}', inputs.env || 'eng') || '' }}
-      SES_BUCKET:        ${{ needs.load-config.outputs.ses-bucket }}${{ inputs.env != 'prod' && format('-{0}', inputs.env || 'eng') || '' }}
+      # Every environment gets its name as a suffix: eng → -eng, prod → -prod.
+      # This keeps all CloudFormation stacks and AWS resources fully isolated.
+      ENV_SUFFIX:        -${{ inputs.env || 'eng' }}
+      CSV_BUCKET:        ${{ needs.load-config.outputs.csv-bucket }}-${{ inputs.env || 'eng' }}
+      DEPTS_BUCKET:      ${{ needs.load-config.outputs.depts-bucket }}-${{ inputs.env || 'eng' }}
+      SES_BUCKET:        ${{ needs.load-config.outputs.ses-bucket }}-${{ inputs.env || 'eng' }}
       SENDER_DOMAIN:     ${{ needs.load-config.outputs.sender-domain }}
       SENDER_EMAIL:      ${{ needs.load-config.outputs.sender-email }}
-      STACK_IAM:         ${{ needs.load-config.outputs.stack-iam }}${{ inputs.env != 'prod' && format('-{0}', inputs.env || 'eng') || '' }}
-      STACK_S3:          ${{ needs.load-config.outputs.stack-s3 }}${{ inputs.env != 'prod' && format('-{0}', inputs.env || 'eng') || '' }}
-      STACK_SNS:         ${{ needs.load-config.outputs.stack-sns }}${{ inputs.env != 'prod' && format('-{0}', inputs.env || 'eng') || '' }}
-      STACK_SQS:         ${{ needs.load-config.outputs.stack-sqs }}${{ inputs.env != 'prod' && format('-{0}', inputs.env || 'eng') || '' }}
-      STACK_SES:         ${{ needs.load-config.outputs.stack-ses }}${{ inputs.env != 'prod' && format('-{0}', inputs.env || 'eng') || '' }}
-      STACK_CLOUDWATCH:  ${{ needs.load-config.outputs.stack-cloudwatch }}${{ inputs.env != 'prod' && format('-{0}', inputs.env || 'eng') || '' }}
-      STACK_CSV_PARSER:  ${{ needs.load-config.outputs.stack-csv-parser }}${{ inputs.env != 'prod' && format('-{0}', inputs.env || 'eng') || '' }}
-      STACK_ROLLCALL:    ${{ needs.load-config.outputs.stack-rollcall }}${{ inputs.env != 'prod' && format('-{0}', inputs.env || 'eng') || '' }}
-      STACK_SES_EMAILER: ${{ needs.load-config.outputs.stack-ses-emailer }}${{ inputs.env != 'prod' && format('-{0}', inputs.env || 'eng') || '' }}
+      STACK_IAM:         ${{ needs.load-config.outputs.stack-iam }}-${{ inputs.env || 'eng' }}
+      STACK_S3:          ${{ needs.load-config.outputs.stack-s3 }}-${{ inputs.env || 'eng' }}
+      STACK_SNS:         ${{ needs.load-config.outputs.stack-sns }}-${{ inputs.env || 'eng' }}
+      STACK_SQS:         ${{ needs.load-config.outputs.stack-sqs }}-${{ inputs.env || 'eng' }}
+      STACK_SES:         ${{ needs.load-config.outputs.stack-ses }}-${{ inputs.env || 'eng' }}
+      STACK_CLOUDWATCH:  ${{ needs.load-config.outputs.stack-cloudwatch }}-${{ inputs.env || 'eng' }}
+      STACK_CSV_PARSER:  ${{ needs.load-config.outputs.stack-csv-parser }}-${{ inputs.env || 'eng' }}
+      STACK_ROLLCALL:    ${{ needs.load-config.outputs.stack-rollcall }}-${{ inputs.env || 'eng' }}
+      STACK_SES_EMAILER: ${{ needs.load-config.outputs.stack-ses-emailer }}-${{ inputs.env || 'eng' }}
       FILE_PREFIX_UNFILLED:           ${{ needs.load-config.outputs.file-prefix-unfilled }}
       FILE_PREFIX_CONTRACTOR_OPEN:    ${{ needs.load-config.outputs.file-prefix-contractor-open }}
       FILE_PREFIX_CONTRACTOR_CLOSED:  ${{ needs.load-config.outputs.file-prefix-contractor-closed }}
