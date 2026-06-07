@@ -1,20 +1,20 @@
+import email.mime.text
+import io
 import json
 import logging
-import time
-import boto3
-import io
-import botocore.exceptions
 import os
-import pandas as pd
+import time
+
+import boto3
 import openpyxl
-import email.mime.text
+import pandas as pd
 from datetime import datetime, timedelta
 
 logger = logging.getLogger()
 logger.setLevel(logging.INFO)
 
-s3   = boto3.client("s3")
-ses  = boto3.client("ses")
+s3  = boto3.client("s3")
+ses = boto3.client("ses")
 
 BUCKET_NAME  = os.environ.get("CSV_BUCKET")
 DEPTS_BUCKET = os.environ.get("DEPTS_BUCKET")
@@ -24,6 +24,7 @@ TMP_DIR = "/tmp" if os.environ.get("AWS_EXECUTION_ENV") else os.path.join(os.pat
 
 def _decode(val):
     return (val or "").replace("*", " ")
+
 
 FILE_PREFIXES = {
     "unfilled":          _decode(os.environ.get("FILE_PREFIX_UNFILLED")),
@@ -71,8 +72,77 @@ FILTER_CONFIG = {
     },
 }
 
+ESF_WF_FILE     = "ESF WF data file ref.xlsx"
+CC_ID_FILE      = "cc_id.csv"
+DEPTS_FILE      = "depts.csv"
+STATUS_FILE     = "status.csv"
+OUTPUT_FILENAME = "ESF WF data file.xlsx"
+# .ref extension prevents the S3 ObjectCreated trigger (filtered on suffix ".xlsx") from
+# firing ses-emailer when rollcall-lambda refreshes the pipeline-internal reference copy.
+REF_KEY         = "ESF WF data file.ref"
+
+MASTER_COLUMNS = [
+    "Existing v New",
+    "Department",
+    "Worker Type",
+    "Job Code",
+    "Job Profile",
+    "Cost Center ID",
+    "Grade Level",
+    "Management",
+    "Manager Name",
+    "MD-1",
+    "MD-2",
+    "Status",
+    "Req #",
+    "FTE",
+    "Location",
+    "Note",
+    "Hire Name",
+    "Start Date",
+    "State",
+    "Job Requisition Primary Location (Building)",
+    "Job Requisition Additional Locations",
+    "Comment",
+    "Report Status",
+    "Contractor Req Status",
+    "Req Status",
+]
+
+
+def _normalize_req(val):
+    """Normalize a Req # to a consistent string.
+
+    Pandas reads numeric Excel cells as float64, so integer req IDs written as
+    1234567 come back as 1234567.0 and stringify to "1234567.0".  This breaks
+    the isin() match against the current run's "1234567" values, causing rows
+    to be falsely carried forward or silently dropped.
+
+    Numeric-looking values are converted to int-strings ("1234567.0" → "1234567").
+    Non-numeric contractor IDs ("C1234", "CTRC-001") are returned unchanged.
+    """
+    if pd.isna(val):
+        return ""
+    s = str(val).strip()
+    if not s or s == "nan":
+        return ""
+    try:
+        return str(int(float(s)))
+    except (ValueError, TypeError):
+        return s
+
+
+def _to_date(v):
+    """Coerce any date-like value to a date object for comparison, or None on failure."""
+    try:
+        ts = pd.to_datetime(v, errors="coerce")
+        return ts.date() if not pd.isna(ts) else None
+    except Exception:
+        return None
+
+
 def get_newest_file_by_prefix(bucket_name, prefix):
-    response = s3.list_objects_v2(Bucket=bucket_name)
+    response    = s3.list_objects_v2(Bucket=bucket_name)
     all_objects = response.get("Contents", [])
     logger.info("ListObjectsV2: %d object(s) in bucket, searching for prefix '%s'", len(all_objects), prefix)
     matches = [
@@ -85,6 +155,7 @@ def get_newest_file_by_prefix(bucket_name, prefix):
     logger.info(f"Found newest file for '{prefix}': {newest['Key']} (last modified: {newest['LastModified']})")
     return newest["Key"]
 
+
 def discover_files(bucket_name):
     logger.info("Starting file discovery...")
     files = {}
@@ -93,13 +164,15 @@ def discover_files(bucket_name):
     logger.info(f"All files discovered: {files}")
     return files
 
+
 def download_file(bucket_name, key):
-    filename = key.split("/")[-1]
+    filename   = key.split("/")[-1]
     local_path = f"{TMP_DIR}/{filename}"
     logger.info(f"Downloading '{key}' to '{local_path}'...")
     s3.download_file(bucket_name, key, local_path)
     logger.info(f"Downloaded successfully: {local_path}")
     return local_path
+
 
 def download_all_files(bucket_name, discovered_files):
     os.makedirs(TMP_DIR, exist_ok=True)
@@ -109,6 +182,7 @@ def download_all_files(bucket_name, discovered_files):
         local_files[name] = download_file(bucket_name, key)
     logger.info(f"All files downloaded: {local_files}")
     return local_files
+
 
 def find_header_row(local_path, known_columns, sheet_name=None):
     logger.info(f"Searching for header row in '{local_path}'...")
@@ -124,14 +198,16 @@ def find_header_row(local_path, known_columns, sheet_name=None):
         wb.close()
     raise ValueError(f"Could not find header row containing all of: {known_columns}")
 
+
 def load_and_filter(local_path, sheet_name, anchor_columns, filter_column, filter_value):
     logger.info(f"Loading '{local_path}' sheet '{sheet_name}'...")
     header_row = find_header_row(local_path, anchor_columns, sheet_name)
-    df = pd.read_excel(local_path, sheet_name=sheet_name, header=header_row - 1)
+    df         = pd.read_excel(local_path, sheet_name=sheet_name, header=header_row - 1)
     logger.info(f"Loaded {len(df)} rows, applying filter '{filter_column}' == '{filter_value}'...")
     filtered = df[df[filter_column] == filter_value]
     logger.info(f"Filter complete, {len(filtered)} rows remaining")
     return filtered
+
 
 def filter_all_files(local_files):
     logger.info("Starting filtering...")
@@ -144,21 +220,23 @@ def filter_all_files(local_files):
             config["filter_column"],
             config["filter_value"],
         )
-    logger.info("All filtering complete!")
+    logger.info("All filtering complete.")
     return results
+
 
 def load_dept_codes(bucket_name, key):
     logger.info("Loading department codes from S3...")
     response = s3.get_object(Bucket=bucket_name, Key=key)
-    df = pd.read_csv(io.StringIO(response["Body"].read().decode("utf-8")))
-    codes = set(pd.to_numeric(df["cc_id"], errors="coerce").dropna().astype(int))
+    df       = pd.read_csv(io.StringIO(response["Body"].read().decode("utf-8")))
+    codes    = set(pd.to_numeric(df["cc_id"], errors="coerce").dropna().astype(int))
     logger.info(f"Loaded {len(codes)} department codes")
     return codes
+
 
 def filter_candidates(local_path, dept_codes):
     logger.info("Filtering candidates file...")
     header_row = find_header_row(local_path, ["Candidate Name", "Candidate Status"], sheet_name="Sheet1")
-    df = pd.read_excel(local_path, sheet_name="Sheet1", header=header_row - 1)
+    df         = pd.read_excel(local_path, sheet_name="Sheet1", header=header_row - 1)
 
     # Match cost center numerically, same as macro's LEFT(...,4)*1
     df["cc_match"] = pd.to_numeric(
@@ -172,10 +250,6 @@ def filter_candidates(local_path, dept_codes):
     logger.info(f"Candidates filter complete, {len(filtered)} rows remaining")
     return filtered
 
-ESF_WF_FILE = "ESF WF data file ref.xlsx"
-CC_ID_FILE  = "cc_id.csv"
-DEPTS_FILE  = "depts.csv"
-STATUS_FILE = "status.csv"
 
 def load_reference_data(bucket_name):
     logger.info("Loading reference data from S3...")
@@ -192,12 +266,12 @@ def load_reference_data(bucket_name):
     logger.info(f"Loaded depts: {len(depts_df)} rows")
 
     # --- status: full status -> short status ---
-    response = s3.get_object(Bucket=bucket_name, Key=STATUS_FILE)
+    response  = s3.get_object(Bucket=bucket_name, Key=STATUS_FILE)
     status_df = pd.read_csv(io.StringIO(response["Body"].read().decode("utf-8")))
     logger.info(f"Loaded status: {len(status_df)} rows")
 
     # --- ESF WF data file: Reqs and ALL sheets ---
-    response = s3.get_object(Bucket=bucket_name, Key=ESF_WF_FILE)
+    response  = s3.get_object(Bucket=bucket_name, Key=ESF_WF_FILE)
     esf_bytes = io.BytesIO(response["Body"].read())
 
     esf_reqs_df = pd.read_excel(esf_bytes, sheet_name="Reqs")
@@ -214,35 +288,36 @@ def load_reference_data(bucket_name):
     prev_req_nums = set()
     try:
         prev_response = s3.get_object(Bucket=bucket_name, Key=REF_KEY)
-        prev_bytes = io.BytesIO(prev_response["Body"].read())
-        prev_xl = pd.ExcelFile(prev_bytes)
+        prev_bytes    = io.BytesIO(prev_response["Body"].read())
+        prev_xl       = pd.ExcelFile(prev_bytes)
         sheet = "Output" if "Output" in prev_xl.sheet_names else (
                 "Reqs"   if "Reqs"   in prev_xl.sheet_names else None)
         if sheet:
-            prev_df = pd.read_excel(prev_xl, sheet_name=sheet, usecols=["Req #"])
+            prev_df       = pd.read_excel(prev_xl, sheet_name=sheet, usecols=["Req #"])
             prev_req_nums = {_normalize_req(v) for v in prev_df["Req #"] if _normalize_req(v)}
             logger.info("Loaded %d req numbers from previous run", len(prev_req_nums))
     except Exception:
         logger.info("No previous run reference found — all reqs evaluated against static seed only")
 
-    logger.info("All reference data loaded!")
+    logger.info("All reference data loaded.")
     return {
-        "cc_id":          cc_id_df,
-        "depts":          depts_df,
-        "status":         status_df,
-        "esf_reqs":       esf_reqs_df,
-        "esf_all":        esf_all_df,
-        "prev_req_nums":  prev_req_nums,
+        "cc_id":         cc_id_df,
+        "depts":         depts_df,
+        "status":        status_df,
+        "esf_reqs":      esf_reqs_df,
+        "esf_all":       esf_all_df,
+        "prev_req_nums": prev_req_nums,
     }
-    
+
+
 def build_crew_unfilled(filtered, ref):
     logger.info("Building Crew Unfilled...")
     df            = filtered["unfilled"].copy()
     candidates    = filtered["candidates"].copy()
     esf_reqs      = ref["esf_reqs"].copy()
     cc_id         = ref["cc_id"].copy()
+    depts         = ref["depts"].copy()
     prev_req_nums = ref.get("prev_req_nums", set())
-    depts      = ref["depts"].copy()
 
     esf_reqs["Req #"] = pd.to_numeric(esf_reqs["Req #"], errors="coerce")
     req_check = set(esf_reqs["Req #"].dropna().astype(int))
@@ -261,19 +336,19 @@ def build_crew_unfilled(filtered, ref):
         req_num_int = int(req_num)
 
         # Cost Center -> Department (subdepartment) via cc_id
-        cost_center = row.get("Cost Center ID", "")
+        cost_center     = row.get("Cost Center ID", "")
         cost_center_num = pd.to_numeric(cost_center, errors="coerce")
-        dept_match = cc_id[cc_id["cc_id"] == cost_center_num]
-        department = dept_match.iloc[0]["subdepartment"] if not dept_match.empty else ""
+        dept_match      = cc_id[cc_id["cc_id"] == cost_center_num]
+        department      = dept_match.iloc[0]["subdepartment"] if not dept_match.empty else ""
 
         # Department -> MD-2 via depts
         md2_match = depts[depts["department"] == department]
-        md2 = md2_match.iloc[0]["MD-2"] if not md2_match.empty else ""
+        md2       = md2_match.iloc[0]["MD-2"] if not md2_match.empty else ""
 
         existing_v_new = "Existing" if (req_num_int in req_check or str(req_num_int) in prev_req_nums) else "NEW"
 
-        grade_level = row.get("Grade Grouping - GTA", "")
-        grade_str   = str(grade_level) if pd.notna(grade_level) else ""
+        grade_level     = row.get("Grade Grouping - GTA", "")
+        grade_str       = str(grade_level) if pd.notna(grade_level) else ""
         management_type = "Management" if "M" in grade_str else "Non Management"
 
         hire_match = candidates[
@@ -322,8 +397,8 @@ def build_crew_filled(filtered, ref):
 
     # ESF Reqs req numbers as integers — no duplicates confirmed
     esf_reqs["Req #"] = pd.to_numeric(esf_reqs["Req #"], errors="coerce")
-    req_check = set(esf_reqs["Req #"].dropna().astype(int))
-    esf_reqs_indexed = esf_reqs.dropna(subset=["Req #"]).set_index("Req #")
+    req_check         = set(esf_reqs["Req #"].dropna().astype(int))
+    esf_reqs_indexed  = esf_reqs.dropna(subset=["Req #"]).set_index("Req #")
 
     # Status mapping: Candidate Status -> short status
     status_map = dict(zip(status_df["status"], status_df["short status"]))
@@ -358,7 +433,7 @@ def build_crew_filled(filtered, ref):
         req_num_int = int(req_num)
 
         # Cost Center: LEFT 4 of Cost Center column
-        cost_center_4 = str(row.get("Cost Center", "")).strip()[:4]
+        cost_center_4   = str(row.get("Cost Center", "")).strip()[:4]
         cost_center_num = pd.to_numeric(cost_center_4, errors="coerce")
 
         # Cost Center -> Department
@@ -367,7 +442,7 @@ def build_crew_filled(filtered, ref):
 
         # Department -> MD-2
         md2_match = depts[depts["department"] == department]
-        md2 = md2_match.iloc[0]["MD-2"] if not md2_match.empty else ""
+        md2       = md2_match.iloc[0]["MD-2"] if not md2_match.empty else ""
 
         hire_name  = row.get("Candidate Name", "")
         start_date = row.get("Candidate Start Date", "")
@@ -383,13 +458,6 @@ def build_crew_filled(filtered, ref):
             # "Update" if hire name or start date changed since the last ESF snapshot.
             # Normalize both sides to date objects before comparing to avoid false
             # positives from Timestamp vs. float serial-number serialization differences.
-            def _to_date(v):
-                try:
-                    ts = pd.to_datetime(v, errors="coerce")
-                    return ts.date() if not pd.isna(ts) else None
-                except Exception:
-                    return None
-
             if str(esf_hire) != str(hire_name):
                 existing_v_new = "Update"
             elif _to_date(esf_start) != _to_date(start_date):
@@ -404,8 +472,8 @@ def build_crew_filled(filtered, ref):
 
         short_status = status_map.get(row.get("Candidate Status", ""), "")
 
-        grade_level = row.get("Grade", "")
-        grade_str   = str(grade_level) if pd.notna(grade_level) else ""
+        grade_level     = row.get("Grade", "")
+        grade_str       = str(grade_level) if pd.notna(grade_level) else ""
         management_type = "Management" if "M" in grade_str else "Non Management"
 
         rows.append({
@@ -452,7 +520,7 @@ def build_contractor_unfilled(filtered, ref):
 
     # ESF Reqs lookup as strings (contractor req numbers may be non-numeric)
     esf_reqs["Req #"] = esf_reqs["Req #"].astype(str).str.strip()
-    req_exists_set = set(esf_reqs["Req #"].dropna())
+    req_exists_set    = set(esf_reqs["Req #"].dropna())
 
     rows = []
     for idx, row in df.iterrows():
@@ -489,7 +557,7 @@ def build_contractor_unfilled(filtered, ref):
                 md2 = ""
             else:
                 md2_match = depts[depts["department"] == department]
-                md2 = md2_match.iloc[0]["MD-2"] if not md2_match.empty else ""
+                md2       = md2_match.iloc[0]["MD-2"] if not md2_match.empty else ""
 
             # Match original formula: NEW / Open / Filled (three states)
             # "Open" = in ESF Reqs but no hire name recorded yet
@@ -504,11 +572,11 @@ def build_contractor_unfilled(filtered, ref):
                         esf_hire_val = str(esf_row_match.iloc[0].get("Hire Name", "")).strip()
                 existing_v_new = "Filled" if esf_hire_val and esf_hire_val.lower() != "nan" else "Open"
 
-            loc = str(row.get("LOC", "")).strip()
+            loc   = str(row.get("LOC", "")).strip()
             state = _US_STATES.get(loc, loc)
 
             report_status = row.get("Status (Please Make a Selection from List)", "")
-            short_status = status_map.get(str(report_status), "")
+            short_status  = status_map.get(str(report_status), "")
 
             rows.append({
                 "Existing v New":                              existing_v_new,
@@ -538,7 +606,7 @@ def build_contractor_unfilled(filtered, ref):
 
         except Exception as e:
             logger.error(f"Error processing row {idx}: {e}")
-            continue  # Skip bad row
+            continue
 
     result = pd.DataFrame(rows)
     logger.info(f"Contractor Unfilled complete: {len(result)} rows (skipped {len(df) - len(result)})")
@@ -566,7 +634,7 @@ def build_contractor_filled(filtered, ref):
     # Apply filters:
     # Start Date >= NOW()-10 OR Start Date unparseable (invalid/missing dates surface for review)
     # Filled/Cancelled = "F" (case-insensitive)
-    cutoff_date = pd.Timestamp.today() - pd.Timedelta(days=10)
+    cutoff_date      = pd.Timestamp.today() - pd.Timedelta(days=10)
     df["Start Date"] = pd.to_datetime(df["Start Date"], errors="coerce")
     df = df[
         ((df["Start Date"] >= cutoff_date) | df["Start Date"].isna()) &
@@ -582,7 +650,7 @@ def build_contractor_filled(filtered, ref):
         return "" if (not s or s.lower() == "nan") else s
 
     esf_reqs["Req #"] = esf_reqs["Req #"].apply(_norm)
-    req_exists_set = set(esf_reqs["Req #"].dropna())
+    req_exists_set    = set(esf_reqs["Req #"].dropna())
     req_to_hire = (
         esf_reqs.dropna(subset=["Req #"])
         .set_index("Req #")["Hire Name"]
@@ -592,7 +660,7 @@ def build_contractor_filled(filtered, ref):
 
     # cc_id -> subdepartment
     cc_id["cc_id"] = pd.to_numeric(cc_id["cc_id"], errors="coerce")
-    cc_to_subdept = (
+    cc_to_subdept  = (
         cc_id.dropna(subset=["cc_id"])
         .set_index("cc_id")["subdepartment"]
         .to_dict()
@@ -689,62 +757,6 @@ def build_contractor_filled(filtered, ref):
     logger.info(f"Contractor Filled complete: {len(result)} rows")
     return result
 
-OUTPUT_FILE = "ESF WF data file.xlsx"
-OUTPUT_KEY  = "ESF WF data file.xlsx"
-# .ref extension prevents the S3 ObjectCreated trigger (filtered on suffix ".xlsx") from
-# firing ses-emailer when rollcall-lambda refreshes the pipeline-internal reference copy.
-REF_KEY     = "ESF WF data file.ref"
-
-
-def _normalize_req(val):
-    """Normalize a Req # to a consistent string.
-
-    Pandas reads numeric Excel cells as float64, so integer req IDs written as
-    1234567 come back as 1234567.0 and stringify to "1234567.0".  This breaks
-    the isin() match against the current run's "1234567" values, causing rows
-    to be falsely carried forward or silently dropped.
-
-    Numeric-looking values are converted to int-strings ("1234567.0" → "1234567").
-    Non-numeric contractor IDs ("C1234", "CTRC-001") are returned unchanged.
-    """
-    if pd.isna(val):
-        return ""
-    s = str(val).strip()
-    if not s or s == "nan":
-        return ""
-    try:
-        return str(int(float(s)))
-    except (ValueError, TypeError):
-        return s
-
-# Master column order for the combined output
-MASTER_COLUMNS = [
-    "Existing v New",
-    "Department",
-    "Worker Type",
-    "Job Code",
-    "Job Profile",
-    "Cost Center ID",
-    "Grade Level",
-    "Management",
-    "Manager Name",
-    "MD-1",
-    "MD-2",
-    "Status",
-    "Req #",
-    "FTE",
-    "Location",
-    "Note",
-    "Hire Name",
-    "Start Date",
-    "State",
-    "Job Requisition Primary Location (Building)",
-    "Job Requisition Additional Locations",
-    "Comment",
-    "Report Status",
-    "Contractor Req Status",
-    "Req Status",
-]
 
 def standardize_df(df):
     rename_map = {
@@ -758,16 +770,17 @@ def standardize_df(df):
             df[col] = ""
     return df[MASTER_COLUMNS]
 
+
 def write_output_workbook(crew_unfilled, crew_filled, contractor_unfilled, contractor_filled, ret_addr, ref=None, orig_message_id="", orig_subject=""):
     logger.info("Writing output workbook...")
-    output_path = os.path.join(TMP_DIR, OUTPUT_FILE)
+    output_path = os.path.join(TMP_DIR, OUTPUT_FILENAME)
 
     # Step 1 — load previous run from S3
     try:
         logger.info("Loading previous ESF WF data file from S3...")
-        response = s3.get_object(Bucket=DEPTS_BUCKET, Key=REF_KEY)
+        response  = s3.get_object(Bucket=DEPTS_BUCKET, Key=REF_KEY)
         esf_bytes = io.BytesIO(response["Body"].read())
-        
+
         # Check which sheet exists — first run will have "Reqs", subsequent runs "Output"
         xl = pd.ExcelFile(esf_bytes)
         if "Output" in xl.sheet_names:
@@ -786,11 +799,11 @@ def write_output_workbook(crew_unfilled, crew_filled, contractor_unfilled, contr
         # Fresh deploy — bootstrap from the static ref file (Reqs sheet) if it exists
         try:
             logger.info("No reference file found — bootstrapping from %s", ESF_WF_FILE)
-            response = s3.get_object(Bucket=DEPTS_BUCKET, Key=ESF_WF_FILE)
+            response  = s3.get_object(Bucket=DEPTS_BUCKET, Key=ESF_WF_FILE)
             esf_bytes = io.BytesIO(response["Body"].read())
-            xl = pd.ExcelFile(esf_bytes)
+            xl        = pd.ExcelFile(esf_bytes)
             if "Reqs" in xl.sheet_names:
-                prev_df = pd.read_excel(xl, sheet_name="Reqs")
+                prev_df          = pd.read_excel(xl, sheet_name="Reqs")
                 prev_df["Req #"] = prev_df["Req #"].map(_normalize_req)
                 logger.info("Bootstrapped %d rows from %s Reqs sheet", len(prev_df), ESF_WF_FILE)
             else:
@@ -811,8 +824,7 @@ def write_output_workbook(crew_unfilled, crew_filled, contractor_unfilled, contr
     logger.info(f"New data: {len(new_df)} rows")
 
     # Step 3 — merge: new data takes precedence; rows no longer in reports are carried forward
-    new_req_nums = set(new_df["Req #"].dropna())
-
+    new_req_nums    = set(new_df["Req #"].dropna())
     carried_forward = prev_df[~prev_df["Req #"].isin(new_req_nums)].copy()
     carried_forward["Existing v New"] = "Carried Forward"
     logger.info(f"Carried forward from previous run: {len(carried_forward)} rows")
@@ -829,7 +841,7 @@ def write_output_workbook(crew_unfilled, crew_filled, contractor_unfilled, contr
         combined.to_excel(writer, sheet_name="Output", index=False)
 
     logger.info(f"Output workbook written to '{output_path}'")
-    key = f"{ret_addr}/{OUTPUT_KEY}"
+    key     = f"{ret_addr}/{OUTPUT_FILENAME}"
     s3_meta = {k: v for k, v in {
         "original-message-id": orig_message_id,
         "original-subject":    orig_subject[:500],  # S3 metadata value limit is 2 KB total
@@ -842,18 +854,19 @@ def write_output_workbook(crew_unfilled, crew_filled, contractor_unfilled, contr
 
     return output_path
 
+
 def _send_failure_email(to_email, subject_ref="", error_msg="", orig_message_id="", source=""):
     if not to_email or not SENDER_EMAIL:
         logger.warning("Cannot send failure notification — sender or recipient email not configured")
         return
     try:
         if subject_ref:
-            prefix = "" if subject_ref.upper().startswith("RE:") else "RE: "
+            prefix  = "" if subject_ref.upper().startswith("RE:") else "RE: "
             subject = f"{prefix}{subject_ref}"
         else:
             subject = "Pipeline Error — Report Generation Failed"
 
-        ref = f' "{subject_ref}"' if subject_ref else ""
+        ref  = f' "{subject_ref}"' if subject_ref else ""
         body = (
             f"Your files{ref} were received, but an error occurred while generating "
             "the reconciliation report. No output workbook was delivered.\n\n"
@@ -866,7 +879,7 @@ def _send_failure_email(to_email, subject_ref="", error_msg="", orig_message_id=
         if source:
             body += f"\n\nFailed in: {source}"
 
-        msg = email.mime.text.MIMEText(body, "plain")
+        msg            = email.mime.text.MIMEText(body, "plain")
         msg["Subject"] = subject
         msg["From"]    = SENDER_EMAIL
         msg["To"]      = to_email
@@ -898,11 +911,12 @@ def lambda_handler(event, context):
         orig_message_id = sns_payload.get("origMessageId", "")
         orig_subject    = sns_payload.get("origSubject", "")
         logger.info("Return address: %s | origMessageId: %s | origSubject: %s", ret_addr, orig_message_id, orig_subject)
+
         discovered  = discover_files(BUCKET_NAME)
         local_files = download_all_files(BUCKET_NAME, discovered)
         filtered    = filter_all_files(local_files)
 
-        dept_codes = load_dept_codes(DEPTS_BUCKET, CC_ID_FILE)
+        dept_codes             = load_dept_codes(DEPTS_BUCKET, CC_ID_FILE)
         filtered["candidates"] = filter_candidates(local_files["candidates"], dept_codes)
 
         ref = load_reference_data(DEPTS_BUCKET)
@@ -921,12 +935,12 @@ def lambda_handler(event, context):
         logger.info(f"Process complete in {elapsed:.2f}s. Output written to: {output_path}")
         return {
             "statusCode": 200,
-            "status": "success",
+            "status":     "success",
             "body": json.dumps({
                 "message": "Headcount reconciliation complete",
                 "retAddr": ret_addr,
-                "bucket": DEPTS_BUCKET,
-                "key": OUTPUT_KEY
+                "bucket":  DEPTS_BUCKET,
+                "key":     OUTPUT_FILENAME,
             })
         }
 

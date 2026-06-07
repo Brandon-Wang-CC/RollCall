@@ -1,29 +1,28 @@
-import boto3
-import io
-import logging
-import json
 import email
 import email.mime.text
+import io
+import json
+import logging
 import os
-import zipfile
-import xml.etree.ElementTree as ET
-import csv
-import openpyxl
 import random
 import time
-from openpyxl.utils import column_index_from_string
 from datetime import datetime
 
-s3 = boto3.client("s3")
-sns_client = boto3.client("sns")
-ses_client = boto3.client("ses")
+import boto3
+import openpyxl
+from openpyxl.utils import column_index_from_string
+
+s3          = boto3.client("s3")
+sns_client  = boto3.client("sns")
+ses_client  = boto3.client("ses")
 
 logger = logging.getLogger()
 logger.setLevel(logging.INFO)
 
 CSV_BUCKET   = os.environ.get("CSV_BUCKET")
 SENDER_EMAIL = os.environ.get("SENDER_EMAIL")
-NS = {"main": "http://schemas.openxmlformats.org/spreadsheetml/2006/main"}
+
+BLOCKED_SENDERS = {"no-reply-aws@amazon.com"}
 
 
 def _decode(val):
@@ -43,8 +42,8 @@ def process_file(filename, file_content):
             logger.info("Skipping unsupported file in process_file: %s", filename)
             return []
 
-        timestamp = datetime.now().strftime("%Y%m%d-%H%M%S-%f")
-        base_name = filename.rsplit(".", 1)[0]
+        timestamp  = datetime.now().strftime("%Y%m%d-%H%M%S-%f")
+        base_name  = filename.rsplit(".", 1)[0]
         clean_base = base_name.split(" 2")[0].split("-2")[0].rstrip("- ")
 
         results = []
@@ -53,7 +52,6 @@ def process_file(filename, file_content):
             for sheet in ("Open", "Closed"):
                 logger.info("Processing sheet '%s' (NEW-IT) from: %s", sheet, filename)
 
-                # Extract the sheet into a standalone XLSX
                 sheet_bytes = extract_sheet_to_xlsx_bytes(file_content, sheet)
                 if not sheet_bytes:
                     logger.warning("No rows or sheet '%s' not found in %s", sheet, filename)
@@ -86,16 +84,17 @@ def process_file(filename, file_content):
     except Exception as e:
         logger.error("Error in process_file %s: %s", filename, e)
         return []
-    
+
+
 def extract_sheet_to_xlsx_bytes(xlsx_bytes, sheet_name):
     try:
         wb = openpyxl.load_workbook(io.BytesIO(xlsx_bytes), data_only=False)
         if sheet_name not in wb.sheetnames:
             return None
 
-        src = wb[sheet_name]
+        src    = wb[sheet_name]
         new_wb = openpyxl.Workbook()
-        dst = new_wb.active
+        dst    = new_wb.active
         dst.title = src.title
 
         for row in src.iter_rows():
@@ -112,10 +111,10 @@ def extract_sheet_to_xlsx_bytes(xlsx_bytes, sheet_name):
                 try:
                     dcell.number_format = cell.number_format
                     if getattr(cell, 'has_style', False):
-                        dcell.font = cell.font
-                        dcell.fill = cell.fill
-                        dcell.border = cell.border
-                        dcell.alignment = cell.alignment
+                        dcell.font       = cell.font
+                        dcell.fill       = cell.fill
+                        dcell.border     = cell.border
+                        dcell.alignment  = cell.alignment
                         dcell.protection = cell.protection
                 except Exception:
                     pass
@@ -156,35 +155,14 @@ def extract_sheet_to_xlsx_bytes(xlsx_bytes, sheet_name):
         return None
 
 
-
-
-def col_letter_to_index(col):
-    index = 0
-    for char in col:
-        index = index * 26 + (ord(char.upper()) - ord('A') + 1)
-    return index - 1
-
-
-
-def parse_csv_to_rows(csv_bytes):
-    try:
-        text = csv_bytes.decode("utf-8")
-    except UnicodeDecodeError:
-        text = csv_bytes.decode("latin1")
-
-    reader = csv.reader(io.StringIO(text))
-    return list(reader)
-
-
-
 def publish_to_sns(ret_addr: str, orig_message_id: str = "", orig_subject: str = ""):
     topic_arn = os.environ.get("SNS_TOPIC_ARN")
     message = {
-        "status": "processed",
-        "bucket": CSV_BUCKET,
-        "retAddr": ret_addr,
+        "status":        "processed",
+        "bucket":        CSV_BUCKET,
+        "retAddr":       ret_addr,
         "origMessageId": orig_message_id,
-        "origSubject": orig_subject,
+        "origSubject":   orig_subject,
     }
     response = sns_client.publish(
         TopicArn=topic_arn,
@@ -200,12 +178,12 @@ def _send_failure_email(to_email, subject_ref="", error_msg="", orig_message_id=
         return
     try:
         if subject_ref:
-            prefix = "" if subject_ref.upper().startswith("RE:") else "RE: "
+            prefix  = "" if subject_ref.upper().startswith("RE:") else "RE: "
             subject = f"{prefix}{subject_ref}"
         else:
             subject = "Pipeline Error — Unable to Process Submission"
 
-        ref = f' "{subject_ref}"' if subject_ref else ""
+        ref  = f' "{subject_ref}"' if subject_ref else ""
         body = (
             f"Your submission{ref} could not be processed. An error occurred while "
             "reading the attached files and no output report was generated.\n\n"
@@ -219,7 +197,7 @@ def _send_failure_email(to_email, subject_ref="", error_msg="", orig_message_id=
         if source:
             body += f"\n\nFailed in: {source}"
 
-        msg = email.mime.text.MIMEText(body, "plain")
+        msg            = email.mime.text.MIMEText(body, "plain")
         msg["Subject"] = subject
         msg["From"]    = SENDER_EMAIL
         msg["To"]      = to_email
@@ -254,11 +232,10 @@ def _get_object_with_retry(bucket, key, max_retries=3):
 
 def wipe_buckets():
     s3_resource = boto3.resource("s3")
-    bucket = s3_resource.Bucket(CSV_BUCKET)
-    response = bucket.objects.all().delete()
-    count = len(response[0].get("Deleted", [])) if response else 0
+    bucket      = s3_resource.Bucket(CSV_BUCKET)
+    response    = bucket.objects.all().delete()
+    count       = len(response[0].get("Deleted", [])) if response else 0
     logger.info("Wiped %d object(s) from %s", count, CSV_BUCKET)
-
 
 
 def lambda_handler(event, context):
@@ -278,28 +255,27 @@ def lambda_handler(event, context):
         orig_subject    = common_headers.get("subject", "")
         logger.info("Email source: %s | orig messageId: %s | subject: %s", sender_email, orig_message_id, orig_subject)
 
-        BLOCKED_SENDERS = {"no-reply-aws@amazon.com"}
         if sender_email in BLOCKED_SENDERS:
-            logger.info(f"Ignoring email from blocked sender: {sender_email}")
+            logger.info("Ignoring email from blocked sender: %s", sender_email)
             return {"status": "ignored", "reason": "blocked sender"}
 
-        total_files = 0
+        total_files     = 0
         processed_files = []
-        seen_filenames = []
+        seen_filenames  = []
 
         for record in event.get("Records", []):
             sns_message = record["body"]
-            message = json.loads(sns_message)["Message"]
-            mail_obj = json.loads(message)
+            message     = json.loads(sns_message)["Message"]
+            mail_obj    = json.loads(message)
 
-            s3_info = mail_obj["receipt"]["action"]
+            s3_info     = mail_obj["receipt"]["action"]
             bucket_name = s3_info["bucketName"]
-            object_key = s3_info["objectKey"]
+            object_key  = s3_info["objectKey"]
 
             logger.info("Processing email: %s/%s", bucket_name, object_key)
 
             email_obj = _get_object_with_retry(bucket_name, object_key)
-            msg = email.message_from_binary_file(email_obj["Body"])
+            msg       = email.message_from_binary_file(email_obj["Body"])
 
             for part in msg.walk():
                 if "attachment" not in part.get("Content-Disposition", ""):
@@ -339,9 +315,9 @@ def lambda_handler(event, context):
         elapsed = time.time() - start
         logger.info("Handler complete in %.2fs", elapsed)
         return {
-            "status": "success",
+            "status":          "success",
             "processed_files": processed_files,
-            "total_files": total_files
+            "total_files":     total_files,
         }
 
     except Exception as e:

@@ -1,25 +1,20 @@
 import json
+import logging
 import os
 import time
-import boto3
-import logging
+import urllib.parse
 from datetime import datetime
+from email.mime.application import MIMEApplication
 from email.mime.multipart import MIMEMultipart
 from email.mime.text import MIMEText
-from email.mime.application import MIMEApplication
-import urllib.parse
 
-s3 = boto3.client("s3")
+import boto3
+
+s3  = boto3.client("s3")
 ses = boto3.client("ses")
 
 logger = logging.getLogger()
 logger.setLevel(logging.INFO)
-
-
-def parse_event(event):
-    record = event["Records"][0]
-    body = record.get("body")
-    return json.loads(body) if isinstance(body, str) else body
 
 
 def download_file_from_s3(bucket, key, local_path="/tmp/report.xlsx"):
@@ -31,13 +26,13 @@ def download_file_from_s3(bucket, key, local_path="/tmp/report.xlsx"):
 
 
 def send_email_with_attachment(to_email, subject, body, file_path, filename=None, in_reply_to=None, references=None):
-    msg = MIMEMultipart()
+    msg            = MIMEMultipart()
     msg["Subject"] = subject
-    msg["From"] = os.environ.get("SENDER_EMAIL")
-    msg["To"] = to_email
+    msg["From"]    = os.environ.get("SENDER_EMAIL")
+    msg["To"]      = to_email
     if in_reply_to:
         msg["In-Reply-To"] = in_reply_to
-        msg["References"] = references or in_reply_to
+        msg["References"]  = references or in_reply_to
 
     msg.attach(MIMEText(body, "plain"))
 
@@ -49,7 +44,6 @@ def send_email_with_attachment(to_email, subject, body, file_path, filename=None
         "attachment",
         filename=filename or file_path.split("/")[-1]
     )
-
     msg.attach(part)
 
     return ses.send_raw_email(
@@ -65,9 +59,8 @@ def lambda_handler(event, context):
     logger.info(f"SENDER_EMAIL: {os.environ.get('SENDER_EMAIL')}")
 
     record = event["Records"][0]
-
     bucket = record["s3"]["bucket"]["name"]
-    key = record["s3"]["object"]["key"]
+    key    = record["s3"]["object"]["key"]
 
     # S3 event notifications encode special chars (e.g. @ → %40) in object keys
     key = urllib.parse.unquote_plus(key)
@@ -81,13 +74,13 @@ def lambda_handler(event, context):
 
     logger.info(f"Recipient: {to_email} | File: {file_key} | Source: s3://{bucket}/{key}")
 
-    head = s3.head_object(Bucket=bucket, Key=key)
+    head            = s3.head_object(Bucket=bucket, Key=key)
     obj_meta        = head.get("Metadata", {})
     orig_message_id = obj_meta.get("original-message-id", "")
     orig_subject    = obj_meta.get("original-subject", "")
 
     if orig_subject:
-        prefix = "RE: " if not orig_subject.upper().startswith("RE:") else ""
+        prefix  = "RE: " if not orig_subject.upper().startswith("RE:") else ""
         subject = f"{prefix}{orig_subject}"
     else:
         subject = "Headcount Reconciliation Complete"
@@ -101,11 +94,11 @@ def lambda_handler(event, context):
         "No action is required unless corrections are needed."
     )
 
-    timestamp = datetime.now().strftime("%B %-d %Y %-I-%M %p")
+    timestamp       = datetime.now().strftime("%B %-d %Y %-I-%M %p")
     attachment_name = f"ESF WF data file {timestamp}.xlsx"
 
     local_file = download_file_from_s3(bucket, key)
-    response = send_email_with_attachment(
+    response   = send_email_with_attachment(
         to_email=to_email,
         subject=subject,
         body=body,
@@ -119,9 +112,9 @@ def lambda_handler(event, context):
     return {
         "statusCode": 200,
         "body": json.dumps({
-            "message": "Email sent successfully",
-            "to": to_email,
-            "s3": f"s3://{bucket}/{key}",
-            "sesMessageId": response["MessageId"]
+            "message":      "Email sent successfully",
+            "to":           to_email,
+            "s3":           f"s3://{bucket}/{key}",
+            "sesMessageId": response["MessageId"],
         })
     }
