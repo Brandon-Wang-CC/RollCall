@@ -6,6 +6,7 @@ import io
 import botocore.exceptions
 import os
 import pandas as pd
+import openpyxl
 import email.mime.text
 from datetime import datetime, timedelta
 
@@ -111,11 +112,16 @@ def download_all_files(bucket_name, discovered_files):
 
 def find_header_row(local_path, known_columns, sheet_name=None):
     logger.info(f"Searching for header row in '{local_path}'...")
-    df = pd.read_excel(local_path, sheet_name=sheet_name, header=None)
-    for i, row in df.iterrows():
-        if all(col in row.values for col in known_columns):
-            logger.info(f"Header row found at row {i + 1}")
-            return i + 1
+    known_set = set(known_columns)
+    wb = openpyxl.load_workbook(local_path, read_only=True, data_only=True)
+    try:
+        ws = wb[sheet_name] if sheet_name else wb.active
+        for i, row in enumerate(ws.iter_rows(values_only=True), start=1):
+            if known_set.issubset({v for v in row if v is not None}):
+                logger.info(f"Header row found at row {i}")
+                return i
+    finally:
+        wb.close()
     raise ValueError(f"Could not find header row containing all of: {known_columns}")
 
 def load_and_filter(local_path, sheet_name, anchor_columns, filter_column, filter_value):
