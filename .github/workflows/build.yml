@@ -27,6 +27,12 @@ jobs:
           python -m py_compile lambdas/csv-parser/theLambda.py
           python -m py_compile lambdas/ses-emailer/lambda_function.py
 
+      - name: Install test dependencies
+        run: pip install -r requirements-test.txt --quiet
+
+      - name: Run unit tests
+        run: pytest tests/ -v
+
       - name: Validate infrastructure templates
         run: |
           pip install cfn-lint --quiet
