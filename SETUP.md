@@ -53,7 +53,7 @@ Stack names under `stacks` can be left as-is unless they conflict with existing 
 
 ### `.github/CODEOWNERS`
 
-Replace the placeholder email with the address that should receive CloudWatch alarm notifications if a Lambda error occurs during a pipeline run. This is typically an operations or on-call contact. The same address is also set as the GitHub code owner for the repository, so it will receive pull request review requests.
+Replace the placeholder email with the address (or email group) that should receive CloudWatch alarm notifications when the pipeline error threshold is met. The alarm fires when **3 or more Lambda failures occur within a single calendar day** — at that point, AWS SNS sends a notification email to this address. This is typically an operations or on-call distribution list. The same address is also set as the GitHub code owner for the repository, so it will receive pull request review requests.
 
 ### `reference-data/` — Seed the output workbook
 
