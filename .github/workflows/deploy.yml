@@ -1,6 +1,6 @@
 name: Deploy
 
-run-name: Deploy → ${{ inputs.env || 'test' }}
+run-name: Deploy → ${{ inputs.env || 'test' }} (${{ github.ref_name }})
 
 on:
   workflow_dispatch:
@@ -90,9 +90,9 @@ jobs:
             'stack-csv-parser':  config['stacks']['csvParser'],
             'stack-rollcall':    config['stacks']['rollcallLambda'],
             'stack-ses-emailer': config['stacks']['sesEmailer'],
-            'csv-bucket':        settings['CsvBucket'],
-            'depts-bucket':      settings['DeptsBucket'],
-            'ses-bucket':        settings['SesBucket'],
+            'csv-bucket':        config['buckets']['csv'],
+            'depts-bucket':      config['buckets']['depts'],
+            'ses-bucket':        config['buckets']['ses'],
             'sender-domain':              settings['SenderDomain'],
             'sender-email':               settings['SenderEmail'],
             'file-prefix-unfilled':       settings['FilePrefixUnfilled'],
