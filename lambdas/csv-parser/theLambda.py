@@ -23,6 +23,17 @@ CSV_BUCKET = os.environ.get("CSV_BUCKET")
 NS = {"main": "http://schemas.openxmlformats.org/spreadsheetml/2006/main"}
 
 
+def _decode(val):
+    return (val or "").replace("*", " ")
+
+
+FILE_PREFIX_UNFILLED        = _decode(os.environ.get("FILE_PREFIX_UNFILLED"))
+FILE_PREFIX_CONTRACTOR_OPEN = _decode(os.environ.get("FILE_PREFIX_CONTRACTOR_OPEN"))
+FILE_PREFIX_CANDIDATES      = _decode(os.environ.get("FILE_PREFIX_CANDIDATES"))
+# Base contractor prefix — same workbook, two sheets (Open/Closed)
+FILE_PREFIX_CONTRACTOR_BASE = FILE_PREFIX_CONTRACTOR_OPEN.rsplit("-Open", 1)[0]
+
+
 def process_file(filename, file_content):
     try:
         if not filename.lower().endswith(".xlsx"):
@@ -225,6 +236,7 @@ def lambda_handler(event, context):
 
     total_files = 0
     processed_files = []
+    seen_filenames = []
 
     for record in event.get("Records", []):
         sns_message = record["body"]
@@ -255,11 +267,24 @@ def lambda_handler(event, context):
             total_files += 1
 
             results = process_file(filename, file_content)
+            if results:
+                seen_filenames.append(filename)
             processed_files.extend(results)
 
             del file_content
 
-    logger.info("Processed %d/%d files: %s", len(processed_files), total_files, processed_files)
+    logger.info("Processed %d attachment(s) → %d output file(s): %s", total_files, len(processed_files), processed_files)
+
+    missing = []
+    if not any(f.startswith(FILE_PREFIX_UNFILLED) for f in seen_filenames):
+        missing.append(f"unfilled report (expected prefix: '{FILE_PREFIX_UNFILLED}')")
+    if not any(f.startswith(FILE_PREFIX_CONTRACTOR_BASE) for f in seen_filenames):
+        missing.append(f"contractor report (expected prefix: '{FILE_PREFIX_CONTRACTOR_BASE}')")
+    if not any(f.startswith(FILE_PREFIX_CANDIDATES) for f in seen_filenames):
+        missing.append(f"candidates report (expected prefix: '{FILE_PREFIX_CANDIDATES}')")
+    if missing:
+        raise ValueError(f"Email is missing required attachments: {'; '.join(missing)}")
+
     publish_to_sns(sender_email)
 
     elapsed = time.time() - start
