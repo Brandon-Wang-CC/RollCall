@@ -61,18 +61,26 @@ def make_raw_email_bytes(attachments=None):
 
 def make_csv_parser_event(sender="sender@example.com",
                           bucket="test-ses-bucket",
-                          key="RAW_EMAIL/msg-abc"):
+                          key="RAW_EMAIL/msg-abc",
+                          message_id="<msg-abc@mail.example.com>",
+                          subject="Report Submission"):
     """SQS event wrapping an SNS notification from SES email receiving."""
     inner = json.dumps({
-        "mail": {"source": sender},
+        "mail": {
+            "source": sender,
+            "commonHeaders": {
+                "messageId": message_id,
+                "subject": subject,
+            },
+        },
         "receipt": {"action": {"bucketName": bucket, "objectKey": key}},
     })
     return {"Records": [{"body": json.dumps({"Message": inner})}]}
 
 
-def make_rollcall_event(ret_addr="sender@example.com"):
+def make_rollcall_event(ret_addr="sender@example.com", subject="Report Submission"):
     """SQS event wrapping an SNS notification published by csvParser."""
-    inner = json.dumps({"retAddr": ret_addr})
+    inner = json.dumps({"retAddr": ret_addr, "subject": subject})
     return {"Records": [{"body": json.dumps({"Message": inner})}]}
 
 

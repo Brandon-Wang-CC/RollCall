@@ -279,6 +279,37 @@ def test_write_output_workbook_carries_forward_old_rows(tmp_path):
     assert len(req_222) == 1
 
 
+def test_write_output_workbook_seeds_from_reqs_sheet(tmp_path):
+    # First-run bootstrap: previous file is the ESF WF reference with a "Reqs" sheet, not "Output".
+    # Rows absent from the new run should be carried forward.
+    prev_df = pd.DataFrame([{"Req #": "555", "Existing v New": "Existing", "Department": "RefDept"}])
+    for col in rollcall.MASTER_COLUMNS:
+        if col not in prev_df.columns:
+            prev_df[col] = ""
+
+    prev_buf = io.BytesIO()
+    with pd.ExcelWriter(prev_buf, engine="openpyxl") as w:
+        prev_df[rollcall.MASTER_COLUMNS].to_excel(w, sheet_name="Reqs", index=False)
+    prev_bytes = prev_buf.getvalue()
+
+    new_df = pd.DataFrame([{"Req #": "777", "Department": "NewDept"}])
+    mock_s3 = MagicMock()
+    mock_s3.get_object.return_value = {"Body": io.BytesIO(prev_bytes)}
+    mock_s3.exceptions.NoSuchKey = type("NoSuchKey", (Exception,), {})
+    empty = pd.DataFrame(columns=rollcall.MASTER_COLUMNS)
+
+    with patch.object(rollcall, "s3", mock_s3), \
+         patch.object(rollcall, "DEPTS_BUCKET", "test-depts"), \
+         patch.object(rollcall, "TMP_DIR", str(tmp_path)):
+        rollcall.write_output_workbook(new_df, empty, empty, empty, "sender@example.com")
+
+    out_path = mock_s3.upload_file.call_args.args[0]
+    result = pd.read_excel(out_path, sheet_name="Output")
+    req_555 = result[result["Req #"].astype(str) == "555"]
+    assert len(req_555) == 1, "row from Reqs sheet should be carried forward"
+    assert req_555.iloc[0]["Existing v New"] == "Carried Forward"
+
+
 def test_write_output_workbook_fresh_start_when_no_previous(tmp_path):
     NoSuchKey = type("NoSuchKey", (Exception,), {})
     mock_s3 = MagicMock()
