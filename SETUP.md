@@ -9,6 +9,8 @@ RollCall is an automated headcount reconciliation pipeline. When a trigger email
 3. Cross-references lookup data and builds a combined output workbook
 4. Emails the output workbook back to the original sender automatically
 
+If processing fails at any stage, the pipeline sends an error email back to the original sender identifying which Lambda failed and why, so they can correct and resubmit without waiting for an administrator to investigate. Repeated failures (3 or more errors in a 24-hour window) also trigger a CloudWatch alarm email to the operations contact in `CODEOWNERS`.
+
 ---
 
 ## Quick-Start Checklist
@@ -212,4 +214,7 @@ The account is still in SES sandbox (Step 5 not complete). In sandbox mode, SES 
 
 **Alarm emails are not being received**
 The SNS subscription confirmation was not completed. Open the **SNS console → Topics**, find `Lambda1_Error_Notif` or `Lambda2_Error_Notif`, click **Subscriptions**, and check the status. If it shows `PendingConfirmation`, use **Request confirmation** to resend the email.
+
+**Inspecting a failed message**
+Failed SQS messages are retained in the dead-letter queue for **14 days**. Open the SQS console, find the relevant DLQ (`csv-parser-dlq` or `rollcall-dlq-sqs`), and poll for messages to retrieve the original payload. Match the timestamp against the Lambda's CloudWatch log group to find the full error trace.
 

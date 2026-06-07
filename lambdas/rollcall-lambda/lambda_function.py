@@ -542,14 +542,13 @@ def build_contractor_filled(filtered, ref):
     status_col = "Status (Please Make a Selection from List)"
 
     # Apply filters:
-    # Start Date >= NOW()-10, Filled/Cancelled = "F" (case-insensitive)
-    # Exclude the sentinel value "9/31/2022" (invalid date used as placeholder in source data)
+    # Start Date >= NOW()-10 OR Start Date unparseable (invalid/missing dates surface for review)
+    # Filled/Cancelled = "F" (case-insensitive)
     cutoff_date = pd.Timestamp.today() - pd.Timedelta(days=10)
     df["Start Date"] = pd.to_datetime(df["Start Date"], errors="coerce")
     df = df[
-        (df["Start Date"] >= cutoff_date) &
-        (df[filled_col].astype(str).str.upper().str.strip() == "F") &
-        (df["Start Date"].notna())
+        ((df["Start Date"] >= cutoff_date) | df["Start Date"].isna()) &
+        (df[filled_col].astype(str).str.upper().str.strip() == "F")
     ].copy()
 
     # Status mapping
